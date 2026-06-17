@@ -18,14 +18,38 @@ use crate::systems::output::OutputRegistry;
 
 const BASE_INVENTORY_LIMIT: usize = 20;
 
-/// Phase 1 of each tick: drains every pending command from the network channel
-/// without blocking. No `.await` calls are permitted here.
+/// Phase 1 of each tick: drains the network channel into per-player queues,
+/// then dispatches exactly one command per player. No `.await` calls permitted.
 pub fn process_input(
     state: &mut GameState,
     command_rx: &mut mpsc::Receiver<PlayerInput>,
     output_registry: &OutputRegistry,
 ) {
+    // Drain channel into per-player queues.
     while let Ok(input) = command_rx.try_recv() {
+        state
+            .pending_commands
+            .entry(input.client_id)
+            .or_default()
+            .push_back(input.command);
+    }
+
+    // Pop one command per player (collect releases the borrow before dispatch).
+    let to_dispatch: Vec<PlayerInput> = state
+        .pending_commands
+        .iter_mut()
+        .filter_map(|(&client_id, queue)| {
+            queue
+                .pop_front()
+                .map(|command| PlayerInput { client_id, command })
+        })
+        .collect();
+
+    // Drop empty queues.
+    state.pending_commands.retain(|_, q| !q.is_empty());
+
+    // Dispatch exactly one command per player this tick.
+    for input in to_dispatch {
         dispatch(state, input, output_registry);
     }
 }
@@ -815,7 +839,8 @@ mod tests {
         tx.try_send(connect(1)).unwrap();
         tx.try_send(PlayerInput::new(1, Command::Move(Direction::North)))
             .unwrap();
-        process_input(&mut state, &mut rx, &reg);
+        process_input(&mut state, &mut rx, &reg); // tick 1: connect
+        process_input(&mut state, &mut rx, &reg); // tick 2: move
         let entity = state.player_registry.get_entity(1).unwrap();
         let pos = state.world.get::<&Position>(entity).unwrap();
         assert_eq!(pos.room_id, 2);
@@ -827,7 +852,8 @@ mod tests {
         tx.try_send(connect(1)).unwrap();
         tx.try_send(PlayerInput::new(1, Command::Move(Direction::Down)))
             .unwrap();
-        process_input(&mut state, &mut rx, &reg);
+        process_input(&mut state, &mut rx, &reg); // tick 1: connect
+        process_input(&mut state, &mut rx, &reg); // tick 2: move
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("no exit")));
     }
@@ -839,7 +865,8 @@ mod tests {
         tx.try_send(connect(2)).unwrap();
         tx.try_send(PlayerInput::new(1, Command::Say("hi".to_string())))
             .unwrap();
-        process_input(&mut state, &mut rx, &reg);
+        process_input(&mut state, &mut rx, &reg); // tick 1: connect(1) + connect(2)
+        process_input(&mut state, &mut rx, &reg); // tick 2: say
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("You say")));
         assert!(msgs.iter().any(|m| m.contains("Someone says")));
@@ -865,7 +892,8 @@ mod tests {
         tx.try_send(connect(1)).unwrap();
         tx.try_send(PlayerInput::new(1, Command::Unknown("xyzzy".to_string())))
             .unwrap();
-        process_input(&mut state, &mut rx, &reg);
+        process_input(&mut state, &mut rx, &reg); // tick 1: connect
+        process_input(&mut state, &mut rx, &reg); // tick 2: unknown
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("xyzzy")));
     }
@@ -905,7 +933,8 @@ mod tests {
         let (mut state, tx, mut rx, reg, mut out_rx) = setup();
         tx.try_send(connect(1)).unwrap();
         tx.try_send(PlayerInput::new(1, Command::Score)).unwrap();
-        process_input(&mut state, &mut rx, &reg);
+        process_input(&mut state, &mut rx, &reg); // tick 1: connect
+        process_input(&mut state, &mut rx, &reg); // tick 2: score
         let msgs = drain(&mut out_rx);
         let combined = msgs.join("\n");
         assert!(combined.contains("Adventurer"));
@@ -978,7 +1007,8 @@ mod tests {
         let (mut state, tx, mut rx, reg, mut out_rx) = setup();
         tx.try_send(connect(1)).unwrap();
         tx.try_send(PlayerInput::new(1, Command::AdminWho)).unwrap();
-        process_input(&mut state, &mut rx, &reg);
+        process_input(&mut state, &mut rx, &reg); // tick 1: connect
+        process_input(&mut state, &mut rx, &reg); // tick 2: @who
         let msgs = drain(&mut out_rx);
         assert!(msgs
             .iter()
@@ -998,7 +1028,8 @@ mod tests {
         ))
         .unwrap();
         tx.try_send(PlayerInput::new(1, Command::AdminWho)).unwrap();
-        process_input(&mut state, &mut rx, &reg);
+        process_input(&mut state, &mut rx, &reg); // tick 1: connect
+        process_input(&mut state, &mut rx, &reg); // tick 2: @who
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("Online Players")));
     }
@@ -1198,7 +1229,8 @@ mod tests {
         .unwrap();
         tx.try_send(PlayerInput::new(1, Command::Equip("ring beta".to_string())))
             .unwrap();
-        process_input(&mut state, &mut rx, &reg);
+        process_input(&mut state, &mut rx, &reg); // tick 1: equip ring alpha
+        process_input(&mut state, &mut rx, &reg); // tick 2: equip ring beta
 
         assert_eq!(
             state.world.get::<&Equipped>(ring1).unwrap().slot,
@@ -1360,7 +1392,10 @@ mod tests {
             tx.try_send(PlayerInput::new(1, Command::Equip(format!("bag {i}"))))
                 .unwrap();
         }
-        process_input(&mut state, &mut rx, &reg);
+        // One command dispatched per player per tick.
+        for _ in 0..4 {
+            process_input(&mut state, &mut rx, &reg);
+        }
 
         for (bag, &slot) in bags.iter().zip(expected_slots.iter()) {
             assert_eq!(state.world.get::<&Equipped>(*bag).unwrap().slot, slot);

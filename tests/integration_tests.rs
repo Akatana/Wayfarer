@@ -251,7 +251,8 @@ fn look_returns_current_room_description() {
 
     tx.try_send(connect(1)).unwrap();
     tx.try_send(PlayerInput::new(1, Command::Look)).unwrap();
-    process_input(&mut state, &mut rx, &reg);
+    process_input(&mut state, &mut rx, &reg); // tick 1: connect
+    process_input(&mut state, &mut rx, &reg); // tick 2: look
 
     let msgs = drain(receivers.get_mut(&1).unwrap());
     assert!(
@@ -268,7 +269,8 @@ fn player_navigates_town_square_to_north_gate() {
     tx.try_send(connect(1)).unwrap();
     tx.try_send(PlayerInput::new(1, Command::Move(Direction::North)))
         .unwrap();
-    process_input(&mut state, &mut rx, &reg);
+    process_input(&mut state, &mut rx, &reg); // tick 1: connect
+    process_input(&mut state, &mut rx, &reg); // tick 2: move north
 
     let entity = state.player_registry.get_entity(1).unwrap();
     let pos = state.world.get::<&Position>(entity).unwrap();
@@ -291,7 +293,10 @@ fn player_completes_three_room_circuit() {
     ] {
         tx.try_send(PlayerInput::new(1, cmd)).unwrap();
     }
-    process_input(&mut state, &mut rx, &reg);
+    // One command dispatched per player per tick.
+    for _ in 0..4 {
+        process_input(&mut state, &mut rx, &reg);
+    }
 
     let entity = state.player_registry.get_entity(1).unwrap();
     let pos = state.world.get::<&Position>(entity).unwrap();
@@ -307,7 +312,8 @@ fn say_broadcasts_to_players_in_same_room() {
     tx.try_send(connect(2)).unwrap();
     tx.try_send(PlayerInput::new(1, Command::Say("greetings".to_string())))
         .unwrap();
-    process_input(&mut state, &mut rx, &reg);
+    process_input(&mut state, &mut rx, &reg); // tick 1: connect(1) + connect(2)
+    process_input(&mut state, &mut rx, &reg); // tick 2: say
 
     let all_msgs: Vec<String> = receivers.values_mut().flat_map(drain).collect();
     assert!(all_msgs.iter().any(|m| m.contains("You say")));
@@ -375,7 +381,8 @@ fn unknown_command_sends_error_and_does_not_crash() {
         Command::Unknown("frobnicate".to_string()),
     ))
     .unwrap();
-    process_input(&mut state, &mut rx, &reg);
+    process_input(&mut state, &mut rx, &reg); // tick 1: connect
+    process_input(&mut state, &mut rx, &reg); // tick 2: unknown
 
     let msgs = drain(receivers.get_mut(&1).unwrap());
     assert!(msgs.iter().any(|m| m.contains("frobnicate")));

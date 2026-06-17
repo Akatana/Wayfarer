@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::character::CharacterData;
-use crate::command::ClientId;
+use crate::command::{ClientId, Command};
 use crate::components::{
     AdminFlag, BagCapacity, CharacterId, ClientConnection, Equipped, InInventory, ItemDescription,
     ItemId, ItemName, ItemSlot, Name, PlayerQuests, Position, Stats, TwoHanded, Wallet,
@@ -107,6 +107,8 @@ pub struct GameState {
     pub quest_defs: HashMap<i64, QuestDef>,
     /// Player quest state changes waiting to be persisted on the next inter-tick drain.
     pub pending_quest_saves: Vec<QuestSave>,
+    /// Per-player command queues. Each tick processes exactly one command per player.
+    pub pending_commands: HashMap<ClientId, VecDeque<Command>>,
 }
 
 impl GameState {
@@ -132,6 +134,7 @@ impl GameState {
             next_npc_id: 1001,
             quest_defs: HashMap::new(),
             pending_quest_saves: Vec::new(),
+            pending_commands: HashMap::new(),
         }
     }
 

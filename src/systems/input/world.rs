@@ -413,6 +413,7 @@ pub(super) fn handle_quit(state: &mut GameState, client_id: ClientId, registry: 
         }
         state.world.despawn(entity).ok();
     }
+    state.pending_commands.remove(&client_id);
 }
 
 pub(super) fn handle_unknown(client_id: ClientId, raw: &str, registry: &OutputRegistry) {
