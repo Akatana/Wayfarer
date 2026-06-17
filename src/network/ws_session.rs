@@ -108,7 +108,7 @@ pub async fn handle_ws_session(
                 match output {
                     Some(text) => {
                         if sink
-                            .send(Message::Text(crate::color::render(&text).into()))
+                            .send(Message::Text(crate::color::render(&text)))
                             .await
                             .is_err()
                         {

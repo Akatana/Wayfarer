@@ -13,25 +13,29 @@ pub enum Direction {
     Down,
 }
 
-impl Direction {
+impl std::str::FromStr for Direction {
+    type Err = ();
+
     /// Parses a lowercase direction string as stored in the database.
     /// Mirrors the `Display` impl — the two must stay in sync.
-    pub fn from_str(s: &str) -> Option<Direction> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "north" => Some(Direction::North),
-            "south" => Some(Direction::South),
-            "east" => Some(Direction::East),
-            "west" => Some(Direction::West),
-            "northeast" => Some(Direction::NorthEast),
-            "northwest" => Some(Direction::NorthWest),
-            "southeast" => Some(Direction::SouthEast),
-            "southwest" => Some(Direction::SouthWest),
-            "up" => Some(Direction::Up),
-            "down" => Some(Direction::Down),
-            _ => None,
+            "north" => Ok(Direction::North),
+            "south" => Ok(Direction::South),
+            "east" => Ok(Direction::East),
+            "west" => Ok(Direction::West),
+            "northeast" => Ok(Direction::NorthEast),
+            "northwest" => Ok(Direction::NorthWest),
+            "southeast" => Ok(Direction::SouthEast),
+            "southwest" => Ok(Direction::SouthWest),
+            "up" => Ok(Direction::Up),
+            "down" => Ok(Direction::Down),
+            _ => Err(()),
         }
     }
+}
 
+impl Direction {
     /// Returns the logical inverse of this direction (the exit you'd use to return).
     pub fn opposite(self) -> Direction {
         match self {

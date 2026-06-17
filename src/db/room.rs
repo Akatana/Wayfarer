@@ -98,7 +98,7 @@ async fn load(db: &DatabaseConnection) -> Result<RoomRegistry, DbErr> {
             .unwrap_or_default()
             .into_iter()
             .filter_map(|(dir_str, dest_id)| {
-                Direction::from_str(&dir_str).map(|d| {
+                dir_str.parse::<Direction>().ok().map(|d| {
                     (
                         d,
                         Exit {
