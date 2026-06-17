@@ -27,6 +27,7 @@ pub fn parse(input: &str) -> Command {
         "l" | "look" => Command::Look,
         "say" => Command::Say(rest.to_string()),
         "quit" | "exit" | "bye" => Command::Quit,
+        "@who" => Command::AdminWho,
         _ => Command::Unknown(input.to_string()),
     }
 }
@@ -97,5 +98,10 @@ mod tests {
     fn trims_leading_and_trailing_whitespace() {
         assert_eq!(parse("  north  "), Command::Move(Direction::North));
         assert_eq!(parse("  look  "), Command::Look);
+    }
+
+    #[test]
+    fn parses_admin_who_command() {
+        assert_eq!(parse("@who"), Command::AdminWho);
     }
 }

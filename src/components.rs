@@ -49,6 +49,17 @@ pub struct ClientConnection {
     pub client_id: ClientId,
 }
 
+/// Stores the database identifiers for a player entity so saves can be keyed
+/// by id rather than name, and so the account relationship is preserved.
+pub struct CharacterId {
+    pub db_id: i64,
+    pub account_id: i64,
+}
+
+/// Marker component present only on entities whose account has `is_admin = true`.
+/// Guards access to privileged in-game commands.
+pub struct AdminFlag;
+
 #[cfg(test)]
 mod tests {
     use super::*;

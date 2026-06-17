@@ -31,6 +31,8 @@ pub enum Command {
     Look,
     /// Initiate a graceful disconnect and save.
     Quit,
+    /// List all online players (admin only).
+    AdminWho,
     /// Input that could not be mapped to a known command.
     Unknown(String),
 }

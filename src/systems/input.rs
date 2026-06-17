@@ -2,7 +2,7 @@ use tokio::sync::mpsc;
 
 use crate::character::CharacterData;
 use crate::command::{ClientId, Command, PlayerInput};
-use crate::components::{ClientConnection, Position};
+use crate::components::{AdminFlag, ClientConnection, Name, Position};
 use crate::direction::Direction;
 use crate::game_state::GameState;
 use crate::systems::{
@@ -29,6 +29,7 @@ fn dispatch(state: &mut GameState, input: PlayerInput, registry: &OutputRegistry
         Command::Move(dir) => handle_move(state, input.client_id, dir, registry),
         Command::Say(msg) => handle_say(state, input.client_id, &msg, registry),
         Command::Quit => handle_quit(state, input.client_id, registry),
+        Command::AdminWho => handle_admin_who(state, input.client_id, registry),
         Command::Unknown(raw) => handle_unknown(input.client_id, &raw, registry),
     }
 }
@@ -147,6 +148,29 @@ fn handle_quit(state: &mut GameState, client_id: ClientId, registry: &OutputRegi
         }
         state.world.despawn(entity).ok();
     }
+}
+
+fn handle_admin_who(state: &GameState, client_id: ClientId, registry: &OutputRegistry) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if state.world.get::<&AdminFlag>(entity).is_err() {
+        send_to_client(
+            registry,
+            client_id,
+            "You don't have that power.".to_string(),
+        );
+        return;
+    }
+    let mut lines = vec!["<yellow>=== Online Players ===</yellow>".to_string()];
+    let mut q = state.world.query::<(&Name, &ClientConnection)>();
+    for (_, (name, _)) in q.iter() {
+        lines.push(format!("  {}", name.0));
+    }
+    if lines.len() == 1 {
+        lines.push("  (nobody online)".to_string());
+    }
+    send_to_client(registry, client_id, lines.join("\n"));
 }
 
 fn handle_unknown(client_id: ClientId, raw: &str, registry: &OutputRegistry) {
@@ -297,5 +321,33 @@ mod tests {
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("xyzzy")));
+    }
+
+    #[test]
+    fn admin_who_denied_for_regular_player() {
+        let (mut state, tx, mut rx, reg, mut out_rx) = setup();
+        tx.try_send(connect(1)).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::AdminWho)).unwrap();
+        process_input(&mut state, &mut rx, &reg);
+        let msgs = drain(&mut out_rx);
+        assert!(msgs
+            .iter()
+            .any(|m| m.contains("power") || m.contains("permission")));
+    }
+
+    #[test]
+    fn admin_who_lists_players_for_admin() {
+        let (mut state, tx, mut rx, reg, mut out_rx) = setup();
+        let admin_data = CharacterData {
+            is_admin: true,
+            name: "Admin".to_string(),
+            ..Default::default()
+        };
+        tx.try_send(PlayerInput::new(1, Command::Connect(admin_data)))
+            .unwrap();
+        tx.try_send(PlayerInput::new(1, Command::AdminWho)).unwrap();
+        process_input(&mut state, &mut rx, &reg);
+        let msgs = drain(&mut out_rx);
+        assert!(msgs.iter().any(|m| m.contains("Online Players")));
     }
 }

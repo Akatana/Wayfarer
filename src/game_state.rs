@@ -1,6 +1,6 @@
 use crate::character::CharacterData;
 use crate::command::ClientId;
-use crate::components::{ClientConnection, Name, Position, Stats};
+use crate::components::{AdminFlag, CharacterId, ClientConnection, Name, Position, Stats};
 use crate::world::player_registry::PlayerRegistry;
 use crate::world::room::RoomRegistry;
 use crate::world::seed::build_starting_rooms;
@@ -61,7 +61,14 @@ impl GameState {
                 max_mp: data.max_mp,
             },
             ClientConnection { client_id },
+            CharacterId {
+                db_id: data.id,
+                account_id: data.account_id,
+            },
         ));
+        if data.is_admin {
+            self.world.insert(entity, (AdminFlag,)).ok();
+        }
         self.player_registry.register(client_id, entity);
         entity
     }
@@ -74,13 +81,21 @@ impl GameState {
     /// Extracts the current ECS state into a `CharacterData` ready for DB persistence.
     /// Returns `None` if any required component is missing (should not happen in practice).
     pub fn extract_save_data(&self, entity: hecs::Entity) -> Option<CharacterData> {
-        let room_id = { self.world.get::<&Position>(entity).ok()?.room_id };
-        let name = { self.world.get::<&Name>(entity).ok()?.0.clone() };
+        let room_id = self.world.get::<&Position>(entity).ok()?.room_id;
+        let name = self.world.get::<&Name>(entity).ok()?.0.clone();
         let (hp, max_hp, mp, max_mp) = {
             let s = self.world.get::<&Stats>(entity).ok()?;
             (s.hp, s.max_hp, s.mp, s.max_mp)
         };
+        let (id, account_id) = {
+            let c = self.world.get::<&CharacterId>(entity).ok()?;
+            (c.db_id, c.account_id)
+        };
+        let is_admin = self.world.get::<&AdminFlag>(entity).is_ok();
         Some(CharacterData {
+            id,
+            account_id,
+            is_admin,
             name,
             room_id,
             hp,
@@ -174,6 +189,7 @@ mod tests {
             max_hp: 100,
             mp: 40,
             max_mp: 50,
+            ..Default::default()
         };
         let entity = state.spawn_player_from_data(1, &original);
         let extracted = state.extract_save_data(entity).unwrap();

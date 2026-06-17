@@ -31,6 +31,7 @@ async fn main() {
         command_tx.clone(),
         register_tx.clone(),
         deregister_tx.clone(),
+        db.clone(),
     ));
 
     let tcp_handle = tokio::spawn(network::telnet::run_telnet_server(

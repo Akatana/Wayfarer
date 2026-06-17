@@ -1,21 +1,22 @@
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
-use crate::character::CharacterData;
 use crate::command::{ClientId, Command, PlayerInput};
+use crate::db;
 use crate::direction::Direction;
 
 const MOCK_CLIENT_ID: ClientId = 1;
 
 /// Simulates a single player session for local development and smoke-testing.
 ///
-/// Registers a per-client output channel with the game loop, sends a scripted
-/// command sequence (mirroring what `session::handle_session` would produce),
-/// and drains any output that comes back.
+/// Loads or creates a "mock_tester" account and a "Tester" character via the DB,
+/// then runs a scripted command sequence, mirroring what a real session handler
+/// would produce without requiring a live network connection.
 pub async fn run_mock_network(
     command_tx: mpsc::Sender<PlayerInput>,
     register_tx: mpsc::Sender<(ClientId, mpsc::Sender<String>)>,
     deregister_tx: mpsc::Sender<ClientId>,
+    db: sea_orm::DatabaseConnection,
 ) {
     println!("[Mock] Client {MOCK_CLIENT_ID} connecting.");
 
@@ -23,11 +24,22 @@ pub async fn run_mock_network(
     let (out_tx, mut out_rx) = mpsc::channel::<String>(64);
     register_tx.send((MOCK_CLIENT_ID, out_tx)).await.ok();
 
-    // Send Connect with default character data (no DB lookup in the mock).
-    let char_data = CharacterData {
-        name: "Tester".to_string(),
-        ..Default::default()
+    // Ensure the mock account and character exist, then connect with real data.
+    let account = db::account::find_or_create_mock(&db).await;
+    let chars = db::character::list_for_account(&db, account.id, account.is_admin).await;
+    let char_data = if let Some(ch) = chars.into_iter().find(|c| c.name == "Tester") {
+        ch
+    } else {
+        db::character::create_for_account(&db, account.id, "Tester", account.is_admin)
+            .await
+            .unwrap_or_else(|_| crate::character::CharacterData {
+                name: "Tester".to_string(),
+                account_id: account.id,
+                is_admin: account.is_admin,
+                ..Default::default()
+            })
     };
+
     command_tx
         .send(PlayerInput::new(
             MOCK_CLIENT_ID,

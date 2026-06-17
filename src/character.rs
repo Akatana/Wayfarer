@@ -1,10 +1,13 @@
 /// Runtime representation of a character's persistent state.
 ///
-/// Created by the session handler after a DB load-or-create, then sent to the
-/// game loop via `Command::Connect(CharacterData)` so the ECS entity can be
-/// spawned without any async work inside the tick body.
+/// Created by the session handler after auth + character selection, then sent
+/// to the game loop via `Command::Connect(CharacterData)` so the ECS entity
+/// can be spawned without any async work inside the tick body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterData {
+    pub id: i64,
+    pub account_id: i64,
+    pub is_admin: bool,
     pub name: String,
     pub room_id: u64,
     pub hp: i32,
@@ -16,6 +19,9 @@ pub struct CharacterData {
 impl Default for CharacterData {
     fn default() -> Self {
         CharacterData {
+            id: 0,
+            account_id: 0,
+            is_admin: false,
             name: "Adventurer".to_string(),
             room_id: crate::world::seed::STARTING_ROOM_ID,
             hp: 100,
@@ -41,5 +47,10 @@ mod tests {
     fn default_spawns_at_starting_room() {
         use crate::world::seed::STARTING_ROOM_ID;
         assert_eq!(CharacterData::default().room_id, STARTING_ROOM_ID);
+    }
+
+    #[test]
+    fn default_is_not_admin() {
+        assert!(!CharacterData::default().is_admin);
     }
 }

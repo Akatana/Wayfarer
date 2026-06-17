@@ -21,6 +21,7 @@ sea-orm = { version = "1", features = [
 ] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+bcrypt = "0.15"
 
 [dev-dependencies]
 tokio-test = "0.4"

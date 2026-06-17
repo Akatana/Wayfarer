@@ -2,6 +2,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use crate::character::CharacterData;
+use crate::world::seed::STARTING_ROOM_ID;
 
 // ── SeaORM entity ─────────────────────────────────────────────────────────────
 
@@ -10,6 +11,7 @@ use crate::character::CharacterData;
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
+    pub account_id: i64,
     pub name: String,
     pub room_id: i64,
     pub hp: i32,
@@ -23,21 +25,54 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
+// ── Error types ───────────────────────────────────────────────────────────────
+
+#[derive(Debug)]
+pub enum CreateError {
+    NameTaken,
+    Db(DbErr),
+}
+
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
-/// Loads an existing character by name, or creates a fresh one if none exists.
-///
-/// Called from the session handler (network layer) so the game loop tick body
-/// never blocks on I/O.
-pub async fn load_or_create(db: &DatabaseConnection, name: &str) -> CharacterData {
-    if let Ok(Some(model)) = Entity::find().filter(Column::Name.eq(name)).one(db).await {
-        return model_to_data(model);
+/// Returns all characters belonging to the given account.
+pub async fn list_for_account(
+    db: &DatabaseConnection,
+    account_id: i64,
+    is_admin: bool,
+) -> Vec<CharacterData> {
+    Entity::find()
+        .filter(Column::AccountId.eq(account_id))
+        .all(db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| model_to_data(m, is_admin))
+        .collect()
+}
+
+/// Creates a new character for the given account.
+/// Character names are globally unique across all accounts.
+pub async fn create_for_account(
+    db: &DatabaseConnection,
+    account_id: i64,
+    name: &str,
+    is_admin: bool,
+) -> Result<CharacterData, CreateError> {
+    if Entity::find()
+        .filter(Column::Name.eq(name))
+        .one(db)
+        .await
+        .map_err(CreateError::Db)?
+        .is_some()
+    {
+        return Err(CreateError::NameTaken);
     }
 
-    // New character
     let active = ActiveModel {
+        account_id: Set(account_id),
         name: Set(name.to_string()),
-        room_id: Set(1),
+        room_id: Set(STARTING_ROOM_ID as i64),
         hp: Set(100),
         max_hp: Set(100),
         mp: Set(50),
@@ -45,27 +80,32 @@ pub async fn load_or_create(db: &DatabaseConnection, name: &str) -> CharacterDat
         ..Default::default()
     };
 
-    match active.insert(db).await {
-        Ok(model) => model_to_data(model),
-        Err(e) => {
-            eprintln!("[DB] Failed to create character '{name}': {e}");
-            CharacterData {
-                name: name.to_string(),
-                ..Default::default()
-            }
-        }
-    }
+    let model = active.insert(db).await.map_err(CreateError::Db)?;
+    Ok(model_to_data(model, is_admin))
+}
+
+/// Deletes a character, verifying that it belongs to `account_id`.
+/// Returns `true` if a row was deleted, `false` if not found or ownership mismatch.
+pub async fn delete_by_id(
+    db: &DatabaseConnection,
+    char_id: i64,
+    account_id: i64,
+) -> Result<bool, DbErr> {
+    let result = Entity::delete_many()
+        .filter(Column::Id.eq(char_id))
+        .filter(Column::AccountId.eq(account_id))
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected > 0)
 }
 
 /// Persists the current in-game state of a character back to the database.
-///
-/// Called from async tasks spawned by the game loop — never inside the tick body.
+/// Skips characters with id == 0 (mock / test characters not backed by the DB).
 pub async fn save(db: &DatabaseConnection, data: CharacterData) -> Result<(), DbErr> {
-    if let Some(model) = Entity::find()
-        .filter(Column::Name.eq(&data.name))
-        .one(db)
-        .await?
-    {
+    if data.id == 0 {
+        return Ok(());
+    }
+    if let Some(model) = Entity::find_by_id(data.id).one(db).await? {
         let mut active: ActiveModel = model.into();
         active.room_id = Set(data.room_id as i64);
         active.hp = Set(data.hp);
@@ -77,8 +117,11 @@ pub async fn save(db: &DatabaseConnection, data: CharacterData) -> Result<(), Db
     Ok(())
 }
 
-fn model_to_data(m: Model) -> CharacterData {
+fn model_to_data(m: Model, is_admin: bool) -> CharacterData {
     CharacterData {
+        id: m.id,
+        account_id: m.account_id,
+        is_admin,
         name: m.name,
         room_id: m.room_id as u64,
         hp: m.hp,
@@ -93,75 +136,127 @@ fn model_to_data(m: Model) -> CharacterData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema;
-    use sea_orm::Database;
+    use crate::db::{account, connect, schema};
 
-    async fn in_memory_db() -> DatabaseConnection {
-        let db = Database::connect("sqlite::memory:").await.unwrap();
+    async fn test_db() -> DatabaseConnection {
+        let db = connect("sqlite::memory:").await.unwrap();
         schema::create_tables(&db).await.unwrap();
         db
     }
 
-    #[tokio::test]
-    async fn creates_new_character_on_first_login() {
-        let db = in_memory_db().await;
-        let data = load_or_create(&db, "Gandalf").await;
-        assert_eq!(data.name, "Gandalf");
-        assert_eq!(data.room_id, 1);
-        assert_eq!(data.hp, 100);
+    async fn make_account(db: &DatabaseConnection) -> account::AccountData {
+        account::register(db, "testuser", "password").await.unwrap()
     }
 
     #[tokio::test]
-    async fn loads_existing_character_on_second_login() {
-        let db = in_memory_db().await;
-        load_or_create(&db, "Frodo").await; // first login
+    async fn list_is_empty_for_new_account() {
+        let db = test_db().await;
+        let acct = make_account(&db).await;
+        let chars = list_for_account(&db, acct.id, false).await;
+        assert!(chars.is_empty());
+    }
 
-        // Change something in DB
-        let model = Entity::find()
-            .filter(Column::Name.eq("Frodo"))
-            .one(&db)
+    #[tokio::test]
+    async fn create_for_account_inserts_character() {
+        let db = test_db().await;
+        let acct = make_account(&db).await;
+        create_for_account(&db, acct.id, "Aldric", false)
             .await
-            .unwrap()
             .unwrap();
-        let mut active: ActiveModel = model.into();
-        active.room_id = Set(3);
-        active.hp = Set(42);
-        active.update(&db).await.unwrap();
+        let chars = list_for_account(&db, acct.id, false).await;
+        assert_eq!(chars.len(), 1);
+        assert_eq!(chars[0].name, "Aldric");
+    }
 
-        let data = load_or_create(&db, "Frodo").await;
-        assert_eq!(data.room_id, 3);
-        assert_eq!(data.hp, 42);
+    #[tokio::test]
+    async fn created_character_starts_at_full_health() {
+        let db = test_db().await;
+        let acct = make_account(&db).await;
+        let ch = create_for_account(&db, acct.id, "Thane", false)
+            .await
+            .unwrap();
+        assert_eq!(ch.hp, ch.max_hp);
+        assert_eq!(ch.mp, ch.max_mp);
+    }
+
+    #[tokio::test]
+    async fn duplicate_name_returns_error() {
+        let db = test_db().await;
+        let acct = make_account(&db).await;
+        create_for_account(&db, acct.id, "Zara", false)
+            .await
+            .unwrap();
+        let err = create_for_account(&db, acct.id, "Zara", false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CreateError::NameTaken));
+    }
+
+    #[tokio::test]
+    async fn delete_by_id_removes_character() {
+        let db = test_db().await;
+        let acct = make_account(&db).await;
+        let ch = create_for_account(&db, acct.id, "Mira", false)
+            .await
+            .unwrap();
+        let deleted = delete_by_id(&db, ch.id, acct.id).await.unwrap();
+        assert!(deleted);
+        let chars = list_for_account(&db, acct.id, false).await;
+        assert!(chars.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_by_id_requires_matching_account() {
+        let db = test_db().await;
+        let acct = make_account(&db).await;
+        let ch = create_for_account(&db, acct.id, "Kira", false)
+            .await
+            .unwrap();
+        let deleted = delete_by_id(&db, ch.id, acct.id + 99).await.unwrap();
+        assert!(!deleted);
     }
 
     #[tokio::test]
     async fn save_persists_position_and_stats() {
-        let db = in_memory_db().await;
-        load_or_create(&db, "Legolas").await;
+        let db = test_db().await;
+        let acct = make_account(&db).await;
+        let ch = create_for_account(&db, acct.id, "Legolas", false)
+            .await
+            .unwrap();
 
         let updated = CharacterData {
-            name: "Legolas".to_string(),
+            id: ch.id,
             room_id: 4,
             hp: 75,
             max_hp: 100,
             mp: 30,
             max_mp: 50,
+            ..ch.clone()
         };
         save(&db, updated).await.unwrap();
 
-        let reloaded = load_or_create(&db, "Legolas").await;
+        let chars = list_for_account(&db, acct.id, false).await;
+        let reloaded = chars.into_iter().find(|c| c.name == "Legolas").unwrap();
         assert_eq!(reloaded.room_id, 4);
         assert_eq!(reloaded.hp, 75);
         assert_eq!(reloaded.mp, 30);
     }
 
     #[tokio::test]
-    async fn two_different_characters_are_independent() {
-        let db = in_memory_db().await;
-        load_or_create(&db, "Sam").await;
-        load_or_create(&db, "Pippin").await;
+    async fn save_with_id_zero_is_no_op() {
+        let db = test_db().await;
+        let result = save(&db, CharacterData::default()).await;
+        assert!(result.is_ok());
+    }
 
-        let sam = load_or_create(&db, "Sam").await;
-        let pip = load_or_create(&db, "Pippin").await;
-        assert_ne!(sam.name, pip.name);
+    #[tokio::test]
+    async fn is_admin_flag_propagates_from_list() {
+        let db = test_db().await;
+        let acct = make_account(&db).await;
+        create_for_account(&db, acct.id, "Boss", acct.is_admin)
+            .await
+            .unwrap();
+        let chars = list_for_account(&db, acct.id, acct.is_admin).await;
+        assert_eq!(chars[0].is_admin, acct.is_admin);
     }
 }
