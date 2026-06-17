@@ -80,6 +80,33 @@ pub async fn create_tables(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr
 
     db.execute(Statement::from_string(
         DbBackend::Sqlite,
+        "CREATE TABLE IF NOT EXISTS npcs (
+            id          INTEGER PRIMARY KEY,
+            name        TEXT    NOT NULL,
+            description TEXT    NOT NULL DEFAULT '',
+            greeting    TEXT,
+            hostile     INTEGER NOT NULL DEFAULT 0,
+            room_id     INTEGER NOT NULL DEFAULT 1
+        )"
+        .to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        "CREATE TABLE IF NOT EXISTS npc_patrol_routes (
+            npc_id  INTEGER NOT NULL,
+            step    INTEGER NOT NULL,
+            room_id INTEGER NOT NULL,
+            PRIMARY KEY (npc_id, step),
+            FOREIGN KEY (npc_id) REFERENCES npcs(id)
+        )"
+        .to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
         "CREATE TABLE IF NOT EXISTS rooms (
             id          INTEGER PRIMARY KEY,
             name        TEXT    NOT NULL,

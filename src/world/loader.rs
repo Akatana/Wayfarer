@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use crate::direction::Direction;
 use crate::item::EquipRequirements;
+use crate::npc::NpcData;
 use crate::world::room::{Exit, Room, RoomRegistry};
 
 // ── Serde DTOs ────────────────────────────────────────────────────────────────
@@ -77,6 +78,18 @@ pub fn load_items(items_path: &Path) -> Vec<ItemDef> {
     let src = std::fs::read_to_string(items_path)
         .unwrap_or_else(|e| panic!("Cannot read {:?}: {e}", items_path));
     serde_json::from_str(&src).unwrap_or_else(|e| panic!("Invalid JSON in {:?}: {e}", items_path))
+}
+
+/// Loads NPC definitions from `npcs_path` (a JSON array of `NpcData`).
+///
+/// Returns an empty list if the file does not exist; panics on malformed JSON.
+pub fn load_npcs(npcs_path: &Path) -> Vec<NpcData> {
+    if !npcs_path.exists() {
+        return Vec::new();
+    }
+    let src = std::fs::read_to_string(npcs_path)
+        .unwrap_or_else(|e| panic!("Cannot read {:?}: {e}", npcs_path));
+    serde_json::from_str(&src).unwrap_or_else(|e| panic!("Invalid JSON in {:?}: {e}", npcs_path))
 }
 
 // ── Internals ─────────────────────────────────────────────────────────────────

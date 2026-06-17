@@ -68,6 +68,32 @@ pub fn parse(input: &str) -> Command {
         "@roominfo" => Command::AdminRoomInfo,
         "@mitem" if !rest.is_empty() => Command::AdminMitem(rest.to_string()),
         "@destroy" if !rest.is_empty() => Command::AdminDestroy(rest.to_string()),
+        "talk" if !rest.is_empty() => Command::Talk(rest.to_string()),
+        "@mnpc" if !rest.is_empty() => Command::AdminMnpc(rest.to_string()),
+        "@ndestroy" if !rest.is_empty() => Command::AdminNdestroy(rest.to_string()),
+        "@nlist" => Command::AdminNlist,
+        "@ninfo" => rest
+            .parse::<i64>()
+            .map(Command::AdminNinfo)
+            .unwrap_or(Command::Unknown(input.to_string())),
+        "@nname" | "@ndesc" | "@ngreet" | "@nhostile" | "@npatrol" => {
+            let (id_str, payload) = rest.split_once(' ').unwrap_or((rest, ""));
+            match id_str.parse::<i64>() {
+                Ok(id) if !payload.is_empty() => match &verb[1..] {
+                    "nname" => Command::AdminNname(id, payload.to_string()),
+                    "ndesc" => Command::AdminNdesc(id, payload.to_string()),
+                    "ngreet" => Command::AdminNgreet(id, payload.to_string()),
+                    "nhostile" => match payload.to_lowercase().as_str() {
+                        "true" | "yes" | "1" => Command::AdminNhostile(id, true),
+                        "false" | "no" | "0" => Command::AdminNhostile(id, false),
+                        _ => Command::Unknown(input.to_string()),
+                    },
+                    "npatrol" => Command::AdminNpatrol(id, payload.to_string()),
+                    _ => Command::Unknown(input.to_string()),
+                },
+                _ => Command::Unknown(input.to_string()),
+            }
+        }
         "@iname" | "@idesc" | "@islot" | "@ireq" => {
             // All item-edit commands share the format: @cmd <id> <payload>
             let (id_str, payload) = rest.split_once(' ').unwrap_or((rest, ""));

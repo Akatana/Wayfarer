@@ -48,10 +48,24 @@ pub async fn run(
         .await
         .expect("[GameLoop] Failed to fetch max item id");
 
+    // Load NPCs: seed DB on first boot, then spawn into ECS.
+    let npc_seed = crate::world::loader::load_npcs(std::path::Path::new("assets/npcs.json"));
+    crate::db::npc::seed_if_empty(&db, &npc_seed)
+        .await
+        .expect("[GameLoop] Failed to seed NPCs");
+    let npcs = crate::db::npc::load_all(&db)
+        .await
+        .expect("[GameLoop] Failed to load NPCs");
+    let max_npc_id = crate::db::npc::max_id(&db)
+        .await
+        .expect("[GameLoop] Failed to fetch max NPC id");
+
     let mut state = GameState::with_rooms(room_registry);
     state.next_room_id = max_room_id + 1;
     state.next_item_id = max_item_id + 1;
+    state.next_npc_id = max_npc_id + 1;
     crate::world::seed::spawn_items(&mut state.world, &room_items);
+    crate::world::seed::spawn_npcs(&mut state.world, &npcs);
 
     let mut output_registry: HashMap<ClientId, mpsc::Sender<String>> = HashMap::new();
     let mut ticker = interval(Duration::from_millis(TICK_DURATION_MS));
@@ -91,7 +105,19 @@ pub async fn run(
             });
         }
 
-        // Drain admin world/item operations queued by the previous tick.
+        // Drain NPC patrol room saves queued by the previous tick's routine system.
+        for npc_save in state.pending_npc_saves.drain(..) {
+            let db = db.clone();
+            tokio::spawn(async move {
+                if let Err(e) =
+                    crate::db::npc::update_room(&db, npc_save.npc_id, npc_save.room_id).await
+                {
+                    eprintln!("[DB] NPC room save failed: {e}");
+                }
+            });
+        }
+
+        // Drain admin world/item/npc operations queued by the previous tick.
         for op in state.pending_admin_ops.drain(..) {
             let db = db.clone();
             tokio::spawn(async move {
@@ -134,6 +160,23 @@ pub async fn run(
                         )
                         .await
                     }
+                    AdminDbOp::CreateNpc(npc) => crate::db::npc::create(&db, &npc).await,
+                    AdminDbOp::DeleteNpc(id) => crate::db::npc::delete(&db, id).await,
+                    AdminDbOp::UpdateNpcName { id, name } => {
+                        crate::db::npc::update_name(&db, id, &name).await
+                    }
+                    AdminDbOp::UpdateNpcDesc { id, description } => {
+                        crate::db::npc::update_description(&db, id, &description).await
+                    }
+                    AdminDbOp::UpdateNpcGreet { id, greeting } => {
+                        crate::db::npc::update_greeting(&db, id, greeting.as_deref()).await
+                    }
+                    AdminDbOp::UpdateNpcHostile { id, hostile } => {
+                        crate::db::npc::update_hostile(&db, id, hostile).await
+                    }
+                    AdminDbOp::SetNpcPatrol { id, rooms } => {
+                        crate::db::npc::set_patrol(&db, id, &rooms).await
+                    }
                 };
                 if let Err(e) = result {
                     eprintln!("[DB] Admin op failed: {e}");
@@ -152,7 +195,7 @@ pub async fn run(
 
         // Phase 3: NPC Routine System
         let tick = state.current_tick;
-        npc_routine::npc_routine_system(&mut state.world, tick);
+        npc_routine::npc_routine_system(&mut state.world, tick, &mut state.pending_npc_saves);
 
         // Phase 4: Game State Updates  (combat, levelling — future systems)
 

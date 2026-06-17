@@ -136,6 +136,27 @@ pub struct Equipped {
 /// How many extra inventory slots this bag grants when equipped.
 pub struct BagCapacity(pub usize);
 
+// ── NPC components ────────────────────────────────────────────────────────────
+
+/// The database primary key of an NPC entity.
+pub struct NpcId(pub i64);
+
+/// What an NPC says when a player uses the `talk` command on them.
+pub struct NpcGreeting(pub String);
+
+/// Long-form description shown when a player examines the NPC.
+pub struct NpcDescription(pub String);
+
+/// Marker: NPC is hostile to players. No combat effect yet — used for display.
+pub struct Hostile;
+
+/// Ordered patrol route for an NPC — cycles through room_ids on each routine tick.
+pub struct PatrolRoute {
+    pub rooms: Vec<u64>,
+    /// Current position in `rooms`; advances on each routine fire.
+    pub index: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

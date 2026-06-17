@@ -3,12 +3,14 @@ use tokio::sync::mpsc;
 use crate::character::CharacterData;
 use crate::command::{ClientId, Command, PlayerInput};
 use crate::components::{
-    AdminFlag, BagCapacity, CharacterId, ClientConnection, Equipped, InInventory, ItemDescription,
-    ItemId, ItemName, ItemSlot, Name, Position, RoomContents, Stats, TwoHanded,
+    AdminFlag, BagCapacity, CharacterId, ClientConnection, Equipped, Hostile, InInventory,
+    ItemDescription, ItemId, ItemName, ItemSlot, Name, NpcDescription, NpcGreeting, NpcId,
+    NpcRoutine, PatrolRoute, Position, RoomContents, Stats, TwoHanded,
 };
 use crate::direction::Direction;
 use crate::game_state::{AdminDbOp, GameState};
 use crate::item::{EquipRequirements, EquipSlot, ItemData, ItemLocation, ItemLocationSave};
+use crate::npc::NpcData;
 use crate::systems::{
     movement,
     output::{send_to_client, OutputRegistry},
@@ -71,6 +73,28 @@ fn dispatch(state: &mut GameState, input: PlayerInput, registry: &OutputRegistry
         Command::AdminIreq(id, stat, val) => {
             handle_admin_ireq(state, input.client_id, id, stat, val, registry)
         }
+        Command::Talk(target) => handle_talk(state, input.client_id, &target, registry),
+        Command::AdminMnpc(spec) => handle_admin_mnpc(state, input.client_id, spec, registry),
+        Command::AdminNdestroy(target) => {
+            handle_admin_ndestroy(state, input.client_id, &target, registry)
+        }
+        Command::AdminNname(id, name) => {
+            handle_admin_nname(state, input.client_id, id, name, registry)
+        }
+        Command::AdminNdesc(id, desc) => {
+            handle_admin_ndesc(state, input.client_id, id, desc, registry)
+        }
+        Command::AdminNgreet(id, text) => {
+            handle_admin_ngreet(state, input.client_id, id, text, registry)
+        }
+        Command::AdminNhostile(id, hostile) => {
+            handle_admin_nhostile(state, input.client_id, id, hostile, registry)
+        }
+        Command::AdminNpatrol(id, spec) => {
+            handle_admin_npatrol(state, input.client_id, id, spec, registry)
+        }
+        Command::AdminNlist => handle_admin_nlist(state, input.client_id, registry),
+        Command::AdminNinfo(id) => handle_admin_ninfo(state, input.client_id, id, registry),
         Command::Unknown(raw) => handle_unknown(input.client_id, &raw, registry),
     }
 }
@@ -94,6 +118,30 @@ fn describe_room(state: &GameState, room_id: u64) -> Option<String> {
     if !floor_items.is_empty() {
         desc.push_str(&format!("\n[ Items: {} ]", floor_items.join(", ")));
     }
+
+    // NPCs present in this room
+    let npc_pairs: Vec<(hecs::Entity, String)> = {
+        let mut q = state.world.query::<(&Name, &Position, &NpcId)>();
+        q.iter()
+            .filter(|(_, (_, pos, _))| pos.room_id == room_id)
+            .map(|(e, (name, _, _))| (e, name.0.clone()))
+            .collect()
+    };
+    if !npc_pairs.is_empty() {
+        let mut labels: Vec<String> = npc_pairs
+            .into_iter()
+            .map(|(e, name)| {
+                if state.world.get::<&Hostile>(e).is_ok() {
+                    format!("{} <red>(hostile)</red>", name)
+                } else {
+                    name
+                }
+            })
+            .collect();
+        labels.sort_unstable();
+        desc.push_str(&format!("\n[ NPCs: {} ]", labels.join(", ")));
+    }
+
     Some(desc)
 }
 
@@ -705,7 +753,7 @@ fn handle_unequip(
     }
 
     // Try slot name first, then item name.
-    let found: Option<(hecs::Entity, EquipSlot)> = if let Some(slot) = EquipSlot::from_str(target) {
+    let found: Option<(hecs::Entity, EquipSlot)> = if let Some(slot) = EquipSlot::parse(target) {
         // For "ring", try Ring1 then Ring2.
         if slot == EquipSlot::Ring1 {
             find_equipped_in_slot(&state.world, entity, EquipSlot::Ring1)
@@ -811,30 +859,54 @@ fn handle_examine(state: &GameState, client_id: ClientId, target: &str, registry
         }
     };
 
-    let Some(item) = item else {
+    if let Some(item) = item {
+        let name = state
+            .world
+            .get::<&ItemName>(item)
+            .map(|n| n.0.clone())
+            .unwrap_or_default();
+        let desc = state
+            .world
+            .get::<&ItemDescription>(item)
+            .map(|d| d.0.clone())
+            .unwrap_or_else(|_| "Nothing remarkable.".to_string());
         send_to_client(
             registry,
             client_id,
-            format!("You don't see '{}' anywhere.", target),
+            format!("<yellow>{}</yellow>\n   {}", name, desc),
         );
         return;
-    };
+    }
 
-    let name = state
-        .world
-        .get::<&ItemName>(item)
-        .map(|n| n.0.clone())
-        .unwrap_or_default();
-    let desc = state
-        .world
-        .get::<&ItemDescription>(item)
-        .map(|d| d.0.clone())
-        .unwrap_or_else(|_| "Nothing remarkable.".to_string());
+    // Also check NPCs in the current room.
+    if let Some(rid) = room_id {
+        let npc = {
+            let mut q = state.world.query::<(&Name, &Position, &NpcId)>();
+            q.iter()
+                .find(|(_, (n, pos, _))| {
+                    pos.room_id == rid && n.0.to_lowercase().contains(&target_lower)
+                })
+                .map(|(e, (n, _, _))| (e, n.0.clone()))
+        };
+        if let Some((npc_e, npc_name)) = npc {
+            let desc = state
+                .world
+                .get::<&NpcDescription>(npc_e)
+                .map(|d| d.0.clone())
+                .unwrap_or_else(|_| "Nothing remarkable.".to_string());
+            send_to_client(
+                registry,
+                client_id,
+                format!("<yellow>{}</yellow>\n   {}", npc_name, desc),
+            );
+            return;
+        }
+    }
 
     send_to_client(
         registry,
         client_id,
-        format!("<yellow>{}</yellow>\n   {}", name, desc),
+        format!("You don't see '{}' anywhere.", target),
     );
 }
 
@@ -1487,7 +1559,7 @@ fn handle_admin_islot(
             client_id,
             format!("<dim>[Admin] Item #{item_id} equip slot cleared.</dim>"),
         );
-    } else if let Some(slot) = EquipSlot::from_str(&lower) {
+    } else if let Some(slot) = EquipSlot::parse(&lower) {
         state.world.insert(item_ent, (ItemSlot(slot),)).ok();
         state.pending_admin_ops.push(AdminDbOp::UpdateItemSlot {
             id: item_id,
@@ -1690,6 +1762,532 @@ fn handle_admin_destroy(
         client_id,
         format!("<dim>[Admin] '{item_name}' permanently destroyed.</dim>"),
     );
+}
+
+// ── NPC helpers ──────────────────────────────────────────────────────────────
+
+/// Finds the ECS entity whose `NpcId` component matches `npc_id`.
+fn find_npc_entity(world: &hecs::World, npc_id: i64) -> Option<hecs::Entity> {
+    let mut q = world.query::<(&NpcId,)>();
+    q.iter().find(|(_, (id,))| id.0 == npc_id).map(|(e, _)| e)
+}
+
+// ── NPC command handlers ──────────────────────────────────────────────────────
+
+fn handle_talk(
+    state: &mut GameState,
+    client_id: ClientId,
+    target: &str,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    let room_id = match state.world.get::<&Position>(entity).ok() {
+        Some(p) => p.room_id,
+        None => return,
+    };
+
+    let target_lower = target.trim().to_lowercase();
+    let found = {
+        let mut q = state.world.query::<(&Name, &Position, &NpcId)>();
+        q.iter()
+            .filter(|(_, (_, pos, _))| pos.room_id == room_id)
+            .find(|(_, (name, _, _))| name.0.to_lowercase().contains(&target_lower))
+            .map(|(e, (name, _, _))| (e, name.0.clone()))
+    };
+
+    let Some((npc_e, npc_name)) = found else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("You don't see '{}' here.", target),
+        );
+        return;
+    };
+
+    let greeting = state
+        .world
+        .get::<&NpcGreeting>(npc_e)
+        .ok()
+        .map(|g| g.0.clone());
+
+    match greeting {
+        Some(msg) => send_to_client(
+            registry,
+            client_id,
+            format!("{} says: \"{}\"", npc_name, msg),
+        ),
+        None => send_to_client(registry, client_id, format!("{} ignores you.", npc_name)),
+    }
+}
+
+fn handle_admin_mnpc(
+    state: &mut GameState,
+    client_id: ClientId,
+    spec: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+    let Some(room_id) = get_player_room(state, entity) else {
+        return;
+    };
+
+    let (name, description) = match spec.split_once('/') {
+        Some((n, d)) => (n.trim().to_string(), d.trim().to_string()),
+        None => (spec.trim().to_string(), String::new()),
+    };
+    if name.is_empty() {
+        send_to_client(
+            registry,
+            client_id,
+            "Usage: @mnpc <name> [/ <description>]".to_string(),
+        );
+        return;
+    }
+
+    let npc_id = state.next_npc_id;
+    state.next_npc_id += 1;
+
+    let npc_data = NpcData {
+        id: npc_id,
+        name: name.clone(),
+        description: description.clone(),
+        greeting: None,
+        hostile: false,
+        room_id,
+        patrol: Vec::new(),
+    };
+
+    state.world.spawn((
+        NpcId(npc_id),
+        Name(name.clone()),
+        NpcDescription(description),
+        Position { room_id },
+        NpcRoutine {
+            last_action_tick: 0,
+        },
+    ));
+
+    state.pending_admin_ops.push(AdminDbOp::CreateNpc(npc_data));
+
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] NPC '{name}' (#{npc_id}) created in this room.</dim>"),
+    );
+}
+
+fn handle_admin_ndestroy(
+    state: &mut GameState,
+    client_id: ClientId,
+    target: &str,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+    let target = target.trim();
+
+    // Accept either a numeric id (searches world-wide) or a name (searches current room).
+    let found = if let Ok(id) = target.parse::<i64>() {
+        let mut q = state.world.query::<(&Name, &NpcId)>();
+        q.iter()
+            .find(|(_, (_, nid))| nid.0 == id)
+            .map(|(e, (n, nid))| (e, n.0.clone(), nid.0))
+    } else {
+        let Some(room_id) = get_player_room(state, entity) else {
+            return;
+        };
+        let target_lower = target.to_lowercase();
+        let mut q = state.world.query::<(&Name, &Position, &NpcId)>();
+        q.iter()
+            .find(|(_, (n, pos, _))| {
+                pos.room_id == room_id && n.0.to_lowercase().contains(&target_lower)
+            })
+            .map(|(e, (n, _, nid))| (e, n.0.clone(), nid.0))
+    };
+
+    let Some((npc_ent, npc_name, npc_id)) = found else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No NPC matching '{}' found.", target),
+        );
+        return;
+    };
+
+    state.world.despawn(npc_ent).ok();
+    state.pending_admin_ops.push(AdminDbOp::DeleteNpc(npc_id));
+
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] NPC '{npc_name}' permanently destroyed.</dim>"),
+    );
+}
+
+fn handle_admin_nname(
+    state: &mut GameState,
+    client_id: ClientId,
+    npc_id: i64,
+    name: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+    let Some(npc_ent) = find_npc_entity(&state.world, npc_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No NPC with id #{npc_id} exists."),
+        );
+        return;
+    };
+    if let Ok(mut n) = state.world.get::<&mut Name>(npc_ent) {
+        n.0 = name.clone();
+    }
+    state.pending_admin_ops.push(AdminDbOp::UpdateNpcName {
+        id: npc_id,
+        name: name.clone(),
+    });
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] NPC #{npc_id} renamed to '{name}'.</dim>"),
+    );
+}
+
+fn handle_admin_ndesc(
+    state: &mut GameState,
+    client_id: ClientId,
+    npc_id: i64,
+    description: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+    let Some(npc_ent) = find_npc_entity(&state.world, npc_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No NPC with id #{npc_id} exists."),
+        );
+        return;
+    };
+    state
+        .world
+        .insert(npc_ent, (NpcDescription(description.clone()),))
+        .ok();
+    state.pending_admin_ops.push(AdminDbOp::UpdateNpcDesc {
+        id: npc_id,
+        description,
+    });
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] NPC #{npc_id} description updated.</dim>"),
+    );
+}
+
+fn handle_admin_ngreet(
+    state: &mut GameState,
+    client_id: ClientId,
+    npc_id: i64,
+    text: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+    let Some(npc_ent) = find_npc_entity(&state.world, npc_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No NPC with id #{npc_id} exists."),
+        );
+        return;
+    };
+
+    let lower = text.trim().to_lowercase();
+    if lower == "none" {
+        state.world.remove::<(NpcGreeting,)>(npc_ent).ok();
+        state.pending_admin_ops.push(AdminDbOp::UpdateNpcGreet {
+            id: npc_id,
+            greeting: None,
+        });
+        send_to_client(
+            registry,
+            client_id,
+            format!("<dim>[Admin] NPC #{npc_id} greeting cleared.</dim>"),
+        );
+    } else {
+        state
+            .world
+            .insert(npc_ent, (NpcGreeting(text.clone()),))
+            .ok();
+        state.pending_admin_ops.push(AdminDbOp::UpdateNpcGreet {
+            id: npc_id,
+            greeting: Some(text.clone()),
+        });
+        send_to_client(
+            registry,
+            client_id,
+            format!("<dim>[Admin] NPC #{npc_id} greeting set.</dim>"),
+        );
+    }
+}
+
+fn handle_admin_nhostile(
+    state: &mut GameState,
+    client_id: ClientId,
+    npc_id: i64,
+    hostile: bool,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+    let Some(npc_ent) = find_npc_entity(&state.world, npc_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No NPC with id #{npc_id} exists."),
+        );
+        return;
+    };
+
+    if hostile {
+        state.world.insert(npc_ent, (Hostile,)).ok();
+    } else {
+        state.world.remove::<(Hostile,)>(npc_ent).ok();
+    }
+    state.pending_admin_ops.push(AdminDbOp::UpdateNpcHostile {
+        id: npc_id,
+        hostile,
+    });
+    let label = if hostile { "hostile" } else { "friendly" };
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] NPC #{npc_id} is now {label}.</dim>"),
+    );
+}
+
+fn handle_admin_npatrol(
+    state: &mut GameState,
+    client_id: ClientId,
+    npc_id: i64,
+    spec: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+    let Some(npc_ent) = find_npc_entity(&state.world, npc_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No NPC with id #{npc_id} exists."),
+        );
+        return;
+    };
+
+    let lower = spec.trim().to_lowercase();
+    let rooms: Vec<u64> = if lower == "none" {
+        Vec::new()
+    } else {
+        let parsed: Result<Vec<u64>, _> =
+            lower.split(',').map(|s| s.trim().parse::<u64>()).collect();
+        match parsed {
+            Ok(v) => v,
+            Err(_) => {
+                send_to_client(
+                    registry,
+                    client_id,
+                    "Invalid patrol spec. Use comma-separated room ids or 'none'.".to_string(),
+                );
+                return;
+            }
+        }
+    };
+
+    if rooms.is_empty() {
+        state.world.remove::<(PatrolRoute,)>(npc_ent).ok();
+        send_to_client(
+            registry,
+            client_id,
+            format!("<dim>[Admin] NPC #{npc_id} patrol cleared — now stationary.</dim>"),
+        );
+    } else {
+        let current_room = state
+            .world
+            .get::<&Position>(npc_ent)
+            .ok()
+            .map(|p| p.room_id)
+            .unwrap_or(0);
+        let index = rooms.iter().position(|&r| r == current_room).unwrap_or(0);
+        state
+            .world
+            .insert(
+                npc_ent,
+                (PatrolRoute {
+                    rooms: rooms.clone(),
+                    index,
+                },),
+            )
+            .ok();
+        send_to_client(
+            registry,
+            client_id,
+            format!(
+                "<dim>[Admin] NPC #{npc_id} patrol set: {}.</dim>",
+                rooms
+                    .iter()
+                    .map(|r| r.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" → ")
+            ),
+        );
+    }
+    state
+        .pending_admin_ops
+        .push(AdminDbOp::SetNpcPatrol { id: npc_id, rooms });
+}
+
+fn handle_admin_nlist(state: &GameState, client_id: ClientId, registry: &OutputRegistry) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let mut entries: Vec<(i64, String, u64, bool, bool)> = {
+        let mut q = state.world.query::<(&NpcId, &Name, &Position)>();
+        q.iter()
+            .map(|(e, (id, name, pos))| {
+                let hostile = state.world.get::<&Hostile>(e).is_ok();
+                let patrol = state.world.get::<&PatrolRoute>(e).is_ok();
+                (id.0, name.0.clone(), pos.room_id, hostile, patrol)
+            })
+            .collect()
+    };
+    entries.sort_by_key(|e| e.0);
+
+    if entries.is_empty() {
+        send_to_client(registry, client_id, "[Admin] No NPCs in world.".to_string());
+        return;
+    }
+
+    let mut lines = vec![format!("[Admin] NPCs ({} total):", entries.len())];
+    for (id, name, room_id, hostile, patrol) in entries {
+        let tags = match (hostile, patrol) {
+            (true, true) => " [hostile] [patrol]",
+            (true, false) => " [hostile]",
+            (false, true) => " [patrol]",
+            _ => "",
+        };
+        lines.push(format!("  #{id:<6} {name:<30} room {room_id}{tags}"));
+    }
+    send_to_client(registry, client_id, lines.join("\n"));
+}
+
+fn handle_admin_ninfo(
+    state: &GameState,
+    client_id: ClientId,
+    npc_id: i64,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+    let Some(npc_ent) = find_npc_entity(&state.world, npc_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No NPC with id #{npc_id} exists."),
+        );
+        return;
+    };
+
+    let name = state
+        .world
+        .get::<&Name>(npc_ent)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    let desc = state
+        .world
+        .get::<&NpcDescription>(npc_ent)
+        .map(|d| d.0.clone())
+        .unwrap_or_default();
+    let greeting = state
+        .world
+        .get::<&NpcGreeting>(npc_ent)
+        .ok()
+        .map(|g| format!("\"{}\"", g.0))
+        .unwrap_or_else(|| "(none)".to_string());
+    let hostile = state.world.get::<&Hostile>(npc_ent).is_ok();
+    let room_id = state
+        .world
+        .get::<&Position>(npc_ent)
+        .map(|p| p.room_id)
+        .unwrap_or(0);
+    let room_name = state
+        .room_registry
+        .get(room_id)
+        .map(|r| r.name.clone())
+        .unwrap_or_else(|| "Unknown".to_string());
+    let patrol_str = state
+        .world
+        .get::<&PatrolRoute>(npc_ent)
+        .ok()
+        .map(|pr| {
+            pr.rooms
+                .iter()
+                .map(|r| r.to_string())
+                .collect::<Vec<_>>()
+                .join(" → ")
+        })
+        .unwrap_or_else(|| "(stationary)".to_string());
+
+    let lines = [
+        format!("[Admin] NPC #{npc_id} — {name}"),
+        format!("  Description: {desc}"),
+        format!("  Greeting:    {greeting}"),
+        format!("  Hostile:     {}", if hostile { "yes" } else { "no" }),
+        format!("  Room:        {room_id} ({room_name})"),
+        format!("  Patrol:      {patrol_str}"),
+    ];
+    send_to_client(registry, client_id, lines.join("\n"));
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

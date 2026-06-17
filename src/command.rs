@@ -73,6 +73,26 @@ pub enum Command {
     AdminIslot(i64, String),
     /// Set one stat requirement on an item by id: stat ∈ {str, dex, knw, level} (admin only).
     AdminIreq(i64, String, i32),
+    /// Start a conversation with a named NPC in the current room.
+    Talk(String),
+    /// Create an NPC in the current room (admin): "name [/ description]".
+    AdminMnpc(String),
+    /// Destroy a named NPC in the current room (admin).
+    AdminNdestroy(String),
+    /// Rename an NPC by id (admin).
+    AdminNname(i64, String),
+    /// Set an NPC's description by id (admin).
+    AdminNdesc(i64, String),
+    /// Set an NPC's greeting by id — "none" clears it (admin).
+    AdminNgreet(i64, String),
+    /// Toggle an NPC's hostile flag by id (admin): "true" or "false".
+    AdminNhostile(i64, bool),
+    /// Set an NPC's patrol route by id — comma-separated room ids or "none" to clear (admin).
+    AdminNpatrol(i64, String),
+    /// List all NPCs with their ids and current rooms (admin).
+    AdminNlist,
+    /// Show detailed info on an NPC by id (admin).
+    AdminNinfo(i64),
     /// Input that could not be mapped to a known command.
     Unknown(String),
 }

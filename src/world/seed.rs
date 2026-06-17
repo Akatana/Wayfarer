@@ -1,7 +1,9 @@
 use crate::components::{
-    BagCapacity, ItemDescription, ItemId, ItemName, ItemSlot, RoomContents, TwoHanded,
+    BagCapacity, Hostile, ItemDescription, ItemId, ItemName, ItemSlot, Name, NpcDescription,
+    NpcGreeting, NpcId, NpcRoutine, PatrolRoute, Position, RoomContents, TwoHanded,
 };
 use crate::item::{ItemData, ItemLocation};
+use crate::npc::NpcData;
 use crate::world::loader;
 use crate::world::room::RoomRegistry;
 
@@ -43,7 +45,47 @@ pub fn spawn_items(world: &mut hecs::World, items: &[ItemData]) {
             builder.add(BagCapacity(cap));
         }
         if item.requirements.has_any() {
-            builder.add(item.requirements.clone());
+            builder.add(item.requirements);
+        }
+
+        world.spawn(builder.build());
+    }
+}
+
+/// Spawns NPC entities into the ECS world from DB-loaded `NpcData`.
+///
+/// Called once from `game_loop::run()` after the DB is loaded.
+pub fn spawn_npcs(world: &mut hecs::World, npcs: &[NpcData]) {
+    for npc in npcs {
+        let mut builder = hecs::EntityBuilder::new();
+        builder.add(NpcId(npc.id));
+        builder.add(Name(npc.name.clone()));
+        builder.add(Position {
+            room_id: npc.room_id,
+        });
+        builder.add(NpcRoutine {
+            last_action_tick: 0,
+        });
+
+        if !npc.description.is_empty() {
+            builder.add(NpcDescription(npc.description.clone()));
+        }
+        if let Some(ref greeting) = npc.greeting {
+            builder.add(NpcGreeting(greeting.clone()));
+        }
+        if npc.hostile {
+            builder.add(Hostile);
+        }
+        if !npc.patrol.is_empty() {
+            let index = npc
+                .patrol
+                .iter()
+                .position(|&r| r == npc.room_id)
+                .unwrap_or(0);
+            builder.add(PatrolRoute {
+                rooms: npc.patrol.clone(),
+                index,
+            });
         }
 
         world.spawn(builder.build());

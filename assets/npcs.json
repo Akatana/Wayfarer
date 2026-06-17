@@ -1,0 +1,29 @@
+[
+  {
+    "id": 1,
+    "name": "a weathered town guard",
+    "description": "A stern guard in worn leather armor, eyes scanning the square for trouble.",
+    "greeting": "Move along, citizen. Nothing to see here.",
+    "hostile": false,
+    "room_id": 1,
+    "patrol": [1, 2, 1, 2]
+  },
+  {
+    "id": 2,
+    "name": "a hooded wanderer",
+    "description": "A cloaked figure that lingers near the gate, never quite meeting your gaze.",
+    "greeting": "The roads north are dangerous. You have been warned.",
+    "hostile": false,
+    "room_id": 2,
+    "patrol": []
+  },
+  {
+    "id": 3,
+    "name": "a snarling wild dog",
+    "description": "A mangy, fierce-looking dog with bared teeth and a matted coat.",
+    "greeting": null,
+    "hostile": true,
+    "room_id": 3,
+    "patrol": [3, 4, 3, 4]
+  }
+]

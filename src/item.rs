@@ -151,7 +151,7 @@ impl EquipSlot {
     }
 
     /// Parses a player-typed slot name (case-insensitive, spaces ignored).
-    pub fn from_str(s: &str) -> Option<EquipSlot> {
+    pub fn parse(s: &str) -> Option<EquipSlot> {
         match s.to_lowercase().replace(' ', "").as_str() {
             "head" | "helm" | "helmet" => Some(EquipSlot::Head),
             "chest" | "torso" | "body" | "armor" => Some(EquipSlot::Chest),
@@ -197,18 +197,18 @@ mod tests {
 
     #[test]
     fn from_str_parses_known_aliases() {
-        assert_eq!(EquipSlot::from_str("head"), Some(EquipSlot::Head));
-        assert_eq!(EquipSlot::from_str("LEFT HAND"), Some(EquipSlot::LeftHand));
-        assert_eq!(EquipSlot::from_str("shield"), Some(EquipSlot::RightHand));
-        assert_eq!(EquipSlot::from_str("ring"), Some(EquipSlot::Ring1));
-        assert_eq!(EquipSlot::from_str("ring2"), Some(EquipSlot::Ring2));
-        assert_eq!(EquipSlot::from_str("cloak"), Some(EquipSlot::Back));
+        assert_eq!(EquipSlot::parse("head"), Some(EquipSlot::Head));
+        assert_eq!(EquipSlot::parse("LEFT HAND"), Some(EquipSlot::LeftHand));
+        assert_eq!(EquipSlot::parse("shield"), Some(EquipSlot::RightHand));
+        assert_eq!(EquipSlot::parse("ring"), Some(EquipSlot::Ring1));
+        assert_eq!(EquipSlot::parse("ring2"), Some(EquipSlot::Ring2));
+        assert_eq!(EquipSlot::parse("cloak"), Some(EquipSlot::Back));
     }
 
     #[test]
     fn from_str_returns_none_for_unknown() {
-        assert_eq!(EquipSlot::from_str("banana"), None);
-        assert_eq!(EquipSlot::from_str(""), None);
+        assert_eq!(EquipSlot::parse("banana"), None);
+        assert_eq!(EquipSlot::parse(""), None);
     }
 
     #[test]

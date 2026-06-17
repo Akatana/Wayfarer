@@ -8,5 +8,6 @@ pub mod game_loop;
 pub mod game_state;
 pub mod item;
 pub mod network;
+pub mod npc;
 pub mod systems;
 pub mod world;

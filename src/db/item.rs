@@ -270,7 +270,7 @@ fn row_to_item_data(r: &sea_orm::QueryResult) -> Result<ItemData, DbErr> {
     let char_id: Option<i64> = r.try_get("", "char_id")?;
     let equipped_slot_str: Option<String> = r.try_get("", "equipped_slot")?;
 
-    let equip_slot = equip_slot_str.as_deref().and_then(EquipSlot::from_str);
+    let equip_slot = equip_slot_str.as_deref().and_then(EquipSlot::parse);
 
     let location = match location_str.as_str() {
         "inventory" => ItemLocation::Inventory {
@@ -280,7 +280,7 @@ fn row_to_item_data(r: &sea_orm::QueryResult) -> Result<ItemData, DbErr> {
             char_id: char_id.unwrap_or(0),
             slot: equipped_slot_str
                 .as_deref()
-                .and_then(EquipSlot::from_str)
+                .and_then(EquipSlot::parse)
                 .unwrap_or(EquipSlot::LeftHand),
         },
         _ => ItemLocation::Room(room_id.unwrap_or(1) as u64),

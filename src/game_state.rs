@@ -6,6 +6,7 @@ use crate::components::{
 };
 use crate::direction::Direction;
 use crate::item::{ItemData, ItemLocation, ItemLocationSave};
+use crate::npc::{NpcData, NpcRoomSave};
 use crate::world::player_registry::PlayerRegistry;
 use crate::world::room::{Room, RoomRegistry};
 use crate::world::seed::build_starting_rooms;
@@ -50,6 +51,30 @@ pub enum AdminDbOp {
         dexterity: i32,
         knowledge: i32,
     },
+    CreateNpc(NpcData),
+    DeleteNpc(i64),
+    UpdateNpcName {
+        id: i64,
+        name: String,
+    },
+    UpdateNpcDesc {
+        id: i64,
+        description: String,
+    },
+    /// `greeting` is `None` to clear it (NPC becomes silent).
+    UpdateNpcGreet {
+        id: i64,
+        greeting: Option<String>,
+    },
+    UpdateNpcHostile {
+        id: i64,
+        hostile: bool,
+    },
+    /// Replaces the patrol route; empty `rooms` clears it.
+    SetNpcPatrol {
+        id: i64,
+        rooms: Vec<u64>,
+    },
 }
 
 /// The single authoritative runtime state of the server.
@@ -65,12 +90,16 @@ pub struct GameState {
     pub pending_saves: Vec<CharacterData>,
     /// Item location changes waiting to be persisted on the next inter-tick drain.
     pub pending_item_saves: Vec<ItemLocationSave>,
-    /// Admin world/item operations waiting to be persisted on the next inter-tick drain.
+    /// Admin world/item/npc operations waiting to be persisted on the next inter-tick drain.
     pub pending_admin_ops: Vec<AdminDbOp>,
+    /// NPC patrol room changes waiting to be persisted on the next inter-tick drain.
+    pub pending_npc_saves: Vec<NpcRoomSave>,
     /// Next available id for admin-created rooms. Set from DB max at startup.
     pub next_room_id: u64,
     /// Next available id for admin-created items. Set from DB max at startup.
     pub next_item_id: i64,
+    /// Next available id for admin-created NPCs. Set from DB max at startup.
+    pub next_npc_id: i64,
 }
 
 impl GameState {
@@ -90,8 +119,10 @@ impl GameState {
             pending_saves: Vec::new(),
             pending_item_saves: Vec::new(),
             pending_admin_ops: Vec::new(),
+            pending_npc_saves: Vec::new(),
             next_room_id: 1001,
             next_item_id: 1001,
+            next_npc_id: 1001,
         }
     }
 
@@ -167,7 +198,7 @@ impl GameState {
                 builder.add(BagCapacity(cap));
             }
             if item.requirements.has_any() {
-                builder.add(item.requirements.clone());
+                builder.add(item.requirements);
             }
 
             self.world.spawn(builder.build());
