@@ -3,12 +3,14 @@ use std::collections::HashMap;
 use crate::direction::Direction;
 
 /// A one-way directional link between two rooms.
+#[derive(Clone)]
 pub struct Exit {
     pub destination_room_id: u64,
 }
 
 /// A discrete location in the game world. The world is a graph of rooms
 /// connected by `Exit`s — there are no continuous coordinates.
+#[derive(Clone)]
 pub struct Room {
     pub id: u64,
     pub name: String,
@@ -56,6 +58,19 @@ impl RoomRegistry {
 
     pub fn get(&self, room_id: u64) -> Option<&Room> {
         self.rooms.get(&room_id)
+    }
+
+    pub fn get_mut(&mut self, room_id: u64) -> Option<&mut Room> {
+        self.rooms.get_mut(&room_id)
+    }
+
+    pub fn remove(&mut self, room_id: u64) -> Option<Room> {
+        self.rooms.remove(&room_id)
+    }
+
+    /// Returns the highest room id currently in the registry, or 0 if empty.
+    pub fn max_id(&self) -> u64 {
+        self.rooms.keys().copied().max().unwrap_or(0)
     }
 
     /// Returns the destination room_id reachable via `direction` from `room_id`,

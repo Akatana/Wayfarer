@@ -3,16 +3,17 @@ use tokio::sync::mpsc;
 use crate::character::CharacterData;
 use crate::command::{ClientId, Command, PlayerInput};
 use crate::components::{
-    AdminFlag, BagCapacity, ClientConnection, Equipped, InInventory, ItemDescription, ItemName,
-    ItemSlot, Name, Position, RoomContents, Stats, TwoHanded,
+    AdminFlag, BagCapacity, CharacterId, ClientConnection, Equipped, InInventory, ItemDescription,
+    ItemId, ItemName, ItemSlot, Name, Position, RoomContents, Stats, TwoHanded,
 };
 use crate::direction::Direction;
-use crate::game_state::GameState;
-use crate::item::EquipSlot;
+use crate::game_state::{AdminDbOp, GameState};
+use crate::item::{EquipRequirements, EquipSlot, ItemData, ItemLocation, ItemLocationSave};
 use crate::systems::{
     movement,
     output::{send_to_client, OutputRegistry},
 };
+use crate::world::room::{Exit, Room};
 
 const BASE_INVENTORY_LIMIT: usize = 20;
 
@@ -43,6 +44,33 @@ fn dispatch(state: &mut GameState, input: PlayerInput, registry: &OutputRegistry
         Command::Score => handle_score(state, input.client_id, registry),
         Command::Quit => handle_quit(state, input.client_id, registry),
         Command::AdminWho => handle_admin_who(state, input.client_id, registry),
+        Command::AdminGoto(room_id) => handle_admin_goto(state, input.client_id, room_id, registry),
+        Command::AdminDig(dir, name) => {
+            handle_admin_dig(state, input.client_id, dir, name, registry)
+        }
+        Command::AdminLink(dir, dest) => {
+            handle_admin_link(state, input.client_id, dir, dest, registry)
+        }
+        Command::AdminUnlink(dir) => handle_admin_unlink(state, input.client_id, dir, registry),
+        Command::AdminRename(name) => handle_admin_rename(state, input.client_id, name, registry),
+        Command::AdminRedesc(desc) => handle_admin_redesc(state, input.client_id, desc, registry),
+        Command::AdminRoomInfo => handle_admin_roominfo(state, input.client_id, registry),
+        Command::AdminMitem(spec) => handle_admin_mitem(state, input.client_id, spec, registry),
+        Command::AdminDestroy(target) => {
+            handle_admin_destroy(state, input.client_id, &target, registry)
+        }
+        Command::AdminIname(id, name) => {
+            handle_admin_iname(state, input.client_id, id, name, registry)
+        }
+        Command::AdminIdesc(id, desc) => {
+            handle_admin_idesc(state, input.client_id, id, desc, registry)
+        }
+        Command::AdminIslot(id, slot) => {
+            handle_admin_islot(state, input.client_id, id, slot, registry)
+        }
+        Command::AdminIreq(id, stat, val) => {
+            handle_admin_ireq(state, input.client_id, id, stat, val, registry)
+        }
         Command::Unknown(raw) => handle_unknown(input.client_id, &raw, registry),
     }
 }
@@ -119,7 +147,11 @@ fn handle_connect(
 
     if let Some(rid) = room_id {
         if let Some(desc) = describe_room(state, rid) {
-            send_to_client(registry, client_id, format!("Welcome, {}!\n\n{}", data.name, desc));
+            send_to_client(
+                registry,
+                client_id,
+                format!("Welcome, {}!\n\n{}", data.name, desc),
+            );
         }
     }
 
@@ -132,7 +164,11 @@ fn handle_connect(
                 .collect()
         };
         for id in others {
-            send_to_client(registry, id, format!("{} has entered the world.", data.name));
+            send_to_client(
+                registry,
+                id,
+                format!("{} has entered the world.", data.name),
+            );
         }
     }
 }
@@ -142,7 +178,9 @@ fn handle_look(state: &GameState, client_id: ClientId, registry: &OutputRegistry
         return;
     };
     let room_id = {
-        let Ok(pos) = state.world.get::<&Position>(entity) else { return };
+        let Ok(pos) = state.world.get::<&Position>(entity) else {
+            return;
+        };
         pos.room_id
     };
     if let Some(desc) = describe_room(state, room_id) {
@@ -161,10 +199,16 @@ fn handle_move(
     };
 
     let old_room_id = {
-        let Ok(pos) = state.world.get::<&Position>(entity) else { return };
+        let Ok(pos) = state.world.get::<&Position>(entity) else {
+            return;
+        };
         pos.room_id
     };
-    let player_name = state.world.get::<&Name>(entity).map(|n| n.0.clone()).unwrap_or_default();
+    let player_name = state
+        .world
+        .get::<&Name>(entity)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
 
     let new_pos = movement::try_move(&state.world, &state.room_registry, entity, direction);
 
@@ -193,19 +237,35 @@ fn handle_move(
             };
 
             for id in old_occupants {
-                send_to_client(registry, id, format!("{} leaves {}.", player_name, direction));
+                send_to_client(
+                    registry,
+                    id,
+                    format!("{} leaves {}.", player_name, direction),
+                );
             }
             let from = direction.opposite();
             for id in new_occupants {
-                send_to_client(registry, id, format!("{} arrives from the {}.", player_name, from));
+                send_to_client(
+                    registry,
+                    id,
+                    format!("{} arrives from the {}.", player_name, from),
+                );
             }
 
             if let Some(desc) = describe_room(state, new_room_id) {
-                send_to_client(registry, client_id, format!("You head {}.\n\n{}", direction, desc));
+                send_to_client(
+                    registry,
+                    client_id,
+                    format!("You head {}.\n\n{}", direction, desc),
+                );
             }
         }
         None => {
-            send_to_client(registry, client_id, "There's no exit in that direction.".to_string());
+            send_to_client(
+                registry,
+                client_id,
+                "There's no exit in that direction.".to_string(),
+            );
         }
     }
 }
@@ -215,7 +275,9 @@ fn handle_say(state: &GameState, client_id: ClientId, message: &str, registry: &
         return;
     };
     let sender_room_id = {
-        let Ok(pos) = state.world.get::<&Position>(sender_entity) else { return };
+        let Ok(pos) = state.world.get::<&Position>(sender_entity) else {
+            return;
+        };
         pos.room_id
     };
     let recipients: Vec<ClientId> = {
@@ -236,7 +298,9 @@ fn handle_say(state: &GameState, client_id: ClientId, message: &str, registry: &
 }
 
 fn handle_get(state: &mut GameState, client_id: ClientId, target: &str, registry: &OutputRegistry) {
-    let Some(entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
     let target = target.trim();
     if target.is_empty() {
         send_to_client(registry, client_id, "Get what?".to_string());
@@ -244,13 +308,19 @@ fn handle_get(state: &mut GameState, client_id: ClientId, target: &str, registry
     }
 
     let room_id = {
-        let Ok(pos) = state.world.get::<&Position>(entity) else { return };
+        let Ok(pos) = state.world.get::<&Position>(entity) else {
+            return;
+        };
         pos.room_id
     };
 
     let limit = effective_inventory_limit(&state.world, entity);
     if inventory_count(&state.world, entity) >= limit {
-        send_to_client(registry, client_id, format!("Your bag is full ({limit}/{limit})."));
+        send_to_client(
+            registry,
+            client_id,
+            format!("Your bag is full ({limit}/{limit})."),
+        );
         return;
     }
 
@@ -258,21 +328,45 @@ fn handle_get(state: &mut GameState, client_id: ClientId, target: &str, registry
     let found = {
         let mut q = state.world.query::<(&ItemName, &RoomContents)>();
         q.iter()
-            .find(|(_, (n, rc))| rc.room_id == room_id && n.0.to_lowercase().contains(&target_lower))
+            .find(|(_, (n, rc))| {
+                rc.room_id == room_id && n.0.to_lowercase().contains(&target_lower)
+            })
             .map(|(e, (n, _))| (e, n.0.clone()))
     };
 
     let Some((item, item_name)) = found else {
-        send_to_client(registry, client_id, format!("You don't see '{}' here.", target));
+        send_to_client(
+            registry,
+            client_id,
+            format!("You don't see '{}' here.", target),
+        );
         return;
     };
 
     state.world.remove::<(RoomContents,)>(item).ok();
-    state.world.insert(item, (InInventory { owner: entity },)).ok();
+    state
+        .world
+        .insert(item, (InInventory { owner: entity },))
+        .ok();
+
+    // Queue DB location update.
+    if let (Ok(item_id), Ok(char_id)) = (
+        state.world.get::<&ItemId>(item).map(|id| id.0),
+        state.world.get::<&CharacterId>(entity).map(|c| c.db_id),
+    ) {
+        state.pending_item_saves.push(ItemLocationSave {
+            item_id,
+            location: ItemLocation::Inventory { char_id },
+        });
+    }
 
     send_to_client(registry, client_id, format!("You pick up {}.", item_name));
 
-    let player_name = state.world.get::<&Name>(entity).map(|n| n.0.clone()).unwrap_or_default();
+    let player_name = state
+        .world
+        .get::<&Name>(entity)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
     let others: Vec<ClientId> = {
         let mut q = state.world.query::<(&Position, &ClientConnection)>();
         q.iter()
@@ -281,7 +375,11 @@ fn handle_get(state: &mut GameState, client_id: ClientId, target: &str, registry
             .collect()
     };
     for id in others {
-        send_to_client(registry, id, format!("{} picks up {}.", player_name, item_name));
+        send_to_client(
+            registry,
+            id,
+            format!("{} picks up {}.", player_name, item_name),
+        );
     }
 }
 
@@ -291,7 +389,9 @@ fn handle_drop(
     target: &str,
     registry: &OutputRegistry,
 ) {
-    let Some(entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
     let target = target.trim();
     if target.is_empty() {
         send_to_client(registry, client_id, "Drop what?".to_string());
@@ -299,7 +399,9 @@ fn handle_drop(
     }
 
     let room_id = {
-        let Ok(pos) = state.world.get::<&Position>(entity) else { return };
+        let Ok(pos) = state.world.get::<&Position>(entity) else {
+            return;
+        };
         pos.room_id
     };
 
@@ -312,16 +414,32 @@ fn handle_drop(
     };
 
     let Some((item, item_name)) = found else {
-        send_to_client(registry, client_id, format!("You don't have '{}' in your bag.", target));
+        send_to_client(
+            registry,
+            client_id,
+            format!("You don't have '{}' in your bag.", target),
+        );
         return;
     };
 
     state.world.remove::<(InInventory,)>(item).ok();
     state.world.insert(item, (RoomContents { room_id },)).ok();
 
+    // Queue DB location update.
+    if let Ok(item_id) = state.world.get::<&ItemId>(item).map(|id| id.0) {
+        state.pending_item_saves.push(ItemLocationSave {
+            item_id,
+            location: ItemLocation::Room(room_id),
+        });
+    }
+
     send_to_client(registry, client_id, format!("You drop {}.", item_name));
 
-    let player_name = state.world.get::<&Name>(entity).map(|n| n.0.clone()).unwrap_or_default();
+    let player_name = state
+        .world
+        .get::<&Name>(entity)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
     let others: Vec<ClientId> = {
         let mut q = state.world.query::<(&Position, &ClientConnection)>();
         q.iter()
@@ -330,12 +448,18 @@ fn handle_drop(
             .collect()
     };
     for id in others {
-        send_to_client(registry, id, format!("{} drops {}.", player_name, item_name));
+        send_to_client(
+            registry,
+            id,
+            format!("{} drops {}.", player_name, item_name),
+        );
     }
 }
 
 fn handle_inventory(state: &GameState, client_id: ClientId, registry: &OutputRegistry) {
-    let Some(entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
 
     let equipped_map: std::collections::HashMap<EquipSlot, String> = {
         let mut q = state.world.query::<(&ItemName, &Equipped)>();
@@ -347,8 +471,15 @@ fn handle_inventory(state: &GameState, client_id: ClientId, registry: &OutputReg
 
     let mut lines = vec!["<yellow>=== Equipment ===</yellow>".to_string()];
     for slot in EquipSlot::all() {
-        let item_str = equipped_map.get(&slot).map(String::as_str).unwrap_or("(empty)");
-        lines.push(format!("  <cyan>{:<12}</cyan> : {}", slot.label(), item_str));
+        let item_str = equipped_map
+            .get(&slot)
+            .map(String::as_str)
+            .unwrap_or("(empty)");
+        lines.push(format!(
+            "  <cyan>{:<12}</cyan> : {}",
+            slot.label(),
+            item_str
+        ));
     }
 
     let bag: Vec<String> = {
@@ -360,7 +491,10 @@ fn handle_inventory(state: &GameState, client_id: ClientId, registry: &OutputReg
     };
 
     let limit = effective_inventory_limit(&state.world, entity);
-    lines.push(format!("\n<yellow>=== Bag ({}/{limit}) ===</yellow>", bag.len()));
+    lines.push(format!(
+        "\n<yellow>=== Bag ({}/{limit}) ===</yellow>",
+        bag.len()
+    ));
     if bag.is_empty() {
         lines.push("  (empty)".to_string());
     } else {
@@ -378,7 +512,9 @@ fn handle_equip(
     target: &str,
     registry: &OutputRegistry,
 ) {
-    let Some(entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
     let target = target.trim();
     if target.is_empty() {
         send_to_client(registry, client_id, "Equip what?".to_string());
@@ -394,18 +530,45 @@ fn handle_equip(
     };
 
     let Some((item, item_name)) = found else {
-        send_to_client(registry, client_id, format!("You don't have '{}' in your bag.", target));
+        send_to_client(
+            registry,
+            client_id,
+            format!("You don't have '{}' in your bag.", target),
+        );
         return;
     };
 
     let item_slot = match state.world.get::<&ItemSlot>(item) {
         Ok(s) => s.0,
         Err(_) => {
-            send_to_client(registry, client_id, format!("{} cannot be equipped.", item_name));
+            send_to_client(
+                registry,
+                client_id,
+                format!("{} cannot be equipped.", item_name),
+            );
             return;
         }
     };
     let is_two_handed = state.world.get::<&TwoHanded>(item).is_ok();
+
+    // Check equipment requirements against the player's current stats.
+    if let Ok(reqs) = state.world.get::<&EquipRequirements>(item) {
+        let stats = match state.world.get::<&Stats>(entity) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        if !reqs.is_met_by(&stats) {
+            send_to_client(
+                registry,
+                client_id,
+                format!(
+                    "You don't meet the requirements to equip {item_name}. Needs: {}",
+                    reqs.display()
+                ),
+            );
+            return;
+        }
+    }
 
     // Rings and bags auto-pick the first free slot of their type.
     let target_slot = if item_slot == EquipSlot::Ring1 {
@@ -414,17 +577,30 @@ fn handle_equip(
         } else if find_equipped_in_slot(&state.world, entity, EquipSlot::Ring2).is_none() {
             EquipSlot::Ring2
         } else {
-            send_to_client(registry, client_id, "Both ring slots are full. Unequip a ring first.".to_string());
+            send_to_client(
+                registry,
+                client_id,
+                "Both ring slots are full. Unequip a ring first.".to_string(),
+            );
             return;
         }
     } else if item_slot == EquipSlot::Bag1 {
-        match [EquipSlot::Bag1, EquipSlot::Bag2, EquipSlot::Bag3, EquipSlot::Bag4]
-            .into_iter()
-            .find(|&s| find_equipped_in_slot(&state.world, entity, s).is_none())
+        match [
+            EquipSlot::Bag1,
+            EquipSlot::Bag2,
+            EquipSlot::Bag3,
+            EquipSlot::Bag4,
+        ]
+        .into_iter()
+        .find(|&s| find_equipped_in_slot(&state.world, entity, s).is_none())
         {
             Some(s) => s,
             None => {
-                send_to_client(registry, client_id, "All bag slots are full. Unequip a bag first.".to_string());
+                send_to_client(
+                    registry,
+                    client_id,
+                    "All bag slots are full. Unequip a bag first.".to_string(),
+                );
                 return;
             }
         }
@@ -436,28 +612,67 @@ fn handle_equip(
         send_to_client(
             registry,
             client_id,
-            format!("{} is already occupied. Unequip it first.", target_slot.label()),
+            format!(
+                "{} is already occupied. Unequip it first.",
+                target_slot.label()
+            ),
         );
         return;
     }
 
-    if is_two_handed && find_equipped_in_slot(&state.world, entity, EquipSlot::RightHand).is_some() {
-        send_to_client(registry, client_id, "Two-handed weapons need both hands free. Unequip your off-hand first.".to_string());
+    if is_two_handed && find_equipped_in_slot(&state.world, entity, EquipSlot::RightHand).is_some()
+    {
+        send_to_client(
+            registry,
+            client_id,
+            "Two-handed weapons need both hands free. Unequip your off-hand first.".to_string(),
+        );
         return;
     }
 
     if target_slot == EquipSlot::RightHand && has_two_handed(&state.world, entity) {
-        send_to_client(registry, client_id, "You can't use an off-hand while wielding a two-handed weapon.".to_string());
+        send_to_client(
+            registry,
+            client_id,
+            "You can't use an off-hand while wielding a two-handed weapon.".to_string(),
+        );
         return;
     }
 
     state.world.remove::<(InInventory,)>(item).ok();
-    state.world.insert(item, (Equipped { owner: entity, slot: target_slot },)).ok();
+    state
+        .world
+        .insert(
+            item,
+            (Equipped {
+                owner: entity,
+                slot: target_slot,
+            },),
+        )
+        .ok();
+
+    // Queue DB location update.
+    if let (Ok(item_id), Ok(char_id)) = (
+        state.world.get::<&ItemId>(item).map(|id| id.0),
+        state.world.get::<&CharacterId>(entity).map(|c| c.db_id),
+    ) {
+        state.pending_item_saves.push(ItemLocationSave {
+            item_id,
+            location: ItemLocation::Equipped {
+                char_id,
+                slot: target_slot,
+            },
+        });
+    }
 
     send_to_client(
         registry,
         client_id,
-        format!("You equip {} <cyan>[{}]</cyan>.", item_name, target_slot.label()),
+        format!(
+            "You equip {} <cyan>[{}]</cyan>.",
+            item_name,
+            target_slot.label()
+        ),
     );
 }
 
@@ -467,15 +682,25 @@ fn handle_unequip(
     target: &str,
     registry: &OutputRegistry,
 ) {
-    let Some(entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
     let target = target.trim();
     if target.is_empty() {
-        send_to_client(registry, client_id, "Unequip what? (slot name or item name)".to_string());
+        send_to_client(
+            registry,
+            client_id,
+            "Unequip what? (slot name or item name)".to_string(),
+        );
         return;
     }
 
     if inventory_count(&state.world, entity) >= effective_inventory_limit(&state.world, entity) {
-        send_to_client(registry, client_id, "Your bag is full. Drop something first.".to_string());
+        send_to_client(
+            registry,
+            client_id,
+            "Your bag is full. Drop something first.".to_string(),
+        );
         return;
     }
 
@@ -501,14 +726,36 @@ fn handle_unequip(
     };
 
     let Some((item, slot)) = found else {
-        send_to_client(registry, client_id, format!("Nothing equipped matching '{}'.", target));
+        send_to_client(
+            registry,
+            client_id,
+            format!("Nothing equipped matching '{}'.", target),
+        );
         return;
     };
 
-    let item_name = state.world.get::<&ItemName>(item).map(|n| n.0.clone()).unwrap_or_default();
+    let item_name = state
+        .world
+        .get::<&ItemName>(item)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
 
     state.world.remove::<(Equipped,)>(item).ok();
-    state.world.insert(item, (InInventory { owner: entity },)).ok();
+    state
+        .world
+        .insert(item, (InInventory { owner: entity },))
+        .ok();
+
+    // Queue DB location update.
+    if let (Ok(item_id), Ok(char_id)) = (
+        state.world.get::<&ItemId>(item).map(|id| id.0),
+        state.world.get::<&CharacterId>(entity).map(|c| c.db_id),
+    ) {
+        state.pending_item_saves.push(ItemLocationSave {
+            item_id,
+            location: ItemLocation::Inventory { char_id },
+        });
+    }
 
     send_to_client(
         registry,
@@ -518,7 +765,9 @@ fn handle_unequip(
 }
 
 fn handle_examine(state: &GameState, client_id: ClientId, target: &str, registry: &OutputRegistry) {
-    let Some(entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
     let target = target.trim();
     if target.is_empty() {
         send_to_client(registry, client_id, "Examine what?".to_string());
@@ -533,7 +782,9 @@ fn handle_examine(state: &GameState, client_id: ClientId, target: &str, registry
         let floor = room_id.and_then(|rid| {
             let mut q = state.world.query::<(&ItemName, &RoomContents)>();
             q.iter()
-                .find(|(_, (n, rc))| rc.room_id == rid && n.0.to_lowercase().contains(&target_lower))
+                .find(|(_, (n, rc))| {
+                    rc.room_id == rid && n.0.to_lowercase().contains(&target_lower)
+                })
                 .map(|(e, _)| e)
         });
         if floor.is_some() {
@@ -542,7 +793,9 @@ fn handle_examine(state: &GameState, client_id: ClientId, target: &str, registry
             let inv = {
                 let mut q = state.world.query::<(&ItemName, &InInventory)>();
                 q.iter()
-                    .find(|(_, (n, inv))| inv.owner == entity && n.0.to_lowercase().contains(&target_lower))
+                    .find(|(_, (n, inv))| {
+                        inv.owner == entity && n.0.to_lowercase().contains(&target_lower)
+                    })
                     .map(|(e, _)| e)
             };
             if inv.is_some() {
@@ -550,29 +803,51 @@ fn handle_examine(state: &GameState, client_id: ClientId, target: &str, registry
             } else {
                 let mut q = state.world.query::<(&ItemName, &Equipped)>();
                 q.iter()
-                    .find(|(_, (n, eq))| eq.owner == entity && n.0.to_lowercase().contains(&target_lower))
+                    .find(|(_, (n, eq))| {
+                        eq.owner == entity && n.0.to_lowercase().contains(&target_lower)
+                    })
                     .map(|(e, _)| e)
             }
         }
     };
 
     let Some(item) = item else {
-        send_to_client(registry, client_id, format!("You don't see '{}' anywhere.", target));
+        send_to_client(
+            registry,
+            client_id,
+            format!("You don't see '{}' anywhere.", target),
+        );
         return;
     };
 
-    let name = state.world.get::<&ItemName>(item).map(|n| n.0.clone()).unwrap_or_default();
-    let desc = state.world.get::<&ItemDescription>(item)
+    let name = state
+        .world
+        .get::<&ItemName>(item)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
+    let desc = state
+        .world
+        .get::<&ItemDescription>(item)
         .map(|d| d.0.clone())
         .unwrap_or_else(|_| "Nothing remarkable.".to_string());
 
-    send_to_client(registry, client_id, format!("<yellow>{}</yellow>\n   {}", name, desc));
+    send_to_client(
+        registry,
+        client_id,
+        format!("<yellow>{}</yellow>\n   {}", name, desc),
+    );
 }
 
 fn handle_score(state: &GameState, client_id: ClientId, registry: &OutputRegistry) {
-    let Some(entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
 
-    let name = state.world.get::<&Name>(entity).map(|n| n.0.clone()).unwrap_or_default();
+    let name = state
+        .world
+        .get::<&Name>(entity)
+        .map(|n| n.0.clone())
+        .unwrap_or_default();
     let is_admin = state.world.get::<&AdminFlag>(entity).is_ok();
     let room_name = {
         let room_id = state.world.get::<&Position>(entity).ok().map(|p| p.room_id);
@@ -582,11 +857,29 @@ fn handle_score(state: &GameState, client_id: ClientId, registry: &OutputRegistr
             .unwrap_or_else(|| "Unknown".to_string())
     };
 
-    let admin_tag = if is_admin { " <yellow>[Admin]</yellow>" } else { "" };
+    let admin_tag = if is_admin {
+        " <yellow>[Admin]</yellow>"
+    } else {
+        ""
+    };
     let mut lines = vec![format!("<yellow>=== {} ===</yellow>{}", name, admin_tag)];
 
     if let Ok(s) = state.world.get::<&Stats>(entity) {
-        lines.push(format!("HP: {}/{}   MP: {}/{}", s.hp, s.max_hp, s.mp, s.max_mp));
+        lines.push(format!(
+            "Level {}  |  XP: {}/{}  |  LP: {}",
+            s.level,
+            s.experience,
+            s.xp_to_next_level(),
+            s.learning_points
+        ));
+        lines.push(format!(
+            "HP:  {}/{}   MP:  {}/{}",
+            s.hp, s.max_hp, s.mp, s.max_mp
+        ));
+        lines.push(format!(
+            "STR: {}   DEX: {}   KNW: {}",
+            s.strength, s.dexterity, s.knowledge
+        ));
     }
     lines.push(format!("Location: {}", room_name));
 
@@ -594,11 +887,19 @@ fn handle_score(state: &GameState, client_id: ClientId, registry: &OutputRegistr
 }
 
 fn handle_quit(state: &mut GameState, client_id: ClientId, registry: &OutputRegistry) {
-    send_to_client(registry, client_id, "Farewell. The world fades around you...".to_string());
+    send_to_client(
+        registry,
+        client_id,
+        "Farewell. The world fades around you...".to_string(),
+    );
 
     if let Some(entity) = state.player_registry.remove(client_id) {
         let room_id = state.world.get::<&Position>(entity).ok().map(|p| p.room_id);
-        let player_name = state.world.get::<&Name>(entity).map(|n| n.0.clone()).unwrap_or_default();
+        let player_name = state
+            .world
+            .get::<&Name>(entity)
+            .map(|n| n.0.clone())
+            .unwrap_or_default();
 
         if let Some(rid) = room_id {
             let others: Vec<ClientId> = {
@@ -613,20 +914,37 @@ fn handle_quit(state: &mut GameState, client_id: ClientId, registry: &OutputRegi
             }
         }
 
-        // Despawn all items owned by this player (bag + equipped).
-        let owned: Vec<hecs::Entity> = {
+        // Queue item location saves then despawn all items owned by this player.
+        let char_id = state
+            .world
+            .get::<&CharacterId>(entity)
+            .map(|c| c.db_id)
+            .unwrap_or(0);
+        let owned: Vec<(hecs::Entity, Option<i64>)> = {
             let inv: Vec<_> = {
-                let mut q = state.world.query::<(&InInventory,)>();
-                q.iter().filter(|(_, (inv,))| inv.owner == entity).map(|(e, _)| e).collect()
+                let mut q = state.world.query::<(&InInventory, Option<&ItemId>)>();
+                q.iter()
+                    .filter(|(_, (inv, _))| inv.owner == entity)
+                    .map(|(e, (_, id))| (e, id.map(|i| i.0)))
+                    .collect()
             };
             let eq: Vec<_> = {
-                let mut q = state.world.query::<(&Equipped,)>();
-                q.iter().filter(|(_, (eq,))| eq.owner == entity).map(|(e, _)| e).collect()
+                let mut q = state.world.query::<(&Equipped, Option<&ItemId>)>();
+                q.iter()
+                    .filter(|(_, (eq, _))| eq.owner == entity)
+                    .map(|(e, (_, id))| (e, id.map(|i| i.0)))
+                    .collect()
             };
             inv.into_iter().chain(eq).collect()
         };
-        for item in owned {
-            state.world.despawn(item).ok();
+        for (item_ent, item_id) in owned {
+            if let Some(id) = item_id {
+                state.pending_item_saves.push(ItemLocationSave {
+                    item_id: id,
+                    location: ItemLocation::Inventory { char_id },
+                });
+            }
+            state.world.despawn(item_ent).ok();
         }
 
         if let Some(save_data) = state.extract_save_data(entity) {
@@ -637,9 +955,15 @@ fn handle_quit(state: &mut GameState, client_id: ClientId, registry: &OutputRegi
 }
 
 fn handle_admin_who(state: &GameState, client_id: ClientId, registry: &OutputRegistry) {
-    let Some(entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
     if state.world.get::<&AdminFlag>(entity).is_err() {
-        send_to_client(registry, client_id, "You don't have that power.".to_string());
+        send_to_client(
+            registry,
+            client_id,
+            "You don't have that power.".to_string(),
+        );
         return;
     }
     let mut lines = vec!["<yellow>=== Online Players ===</yellow>".to_string()];
@@ -654,7 +978,718 @@ fn handle_admin_who(state: &GameState, client_id: ClientId, registry: &OutputReg
 }
 
 fn handle_unknown(client_id: ClientId, raw: &str, registry: &OutputRegistry) {
-    send_to_client(registry, client_id, format!("Huh? '{}' isn't something I understand.", raw));
+    send_to_client(
+        registry,
+        client_id,
+        format!("Huh? '{}' isn't something I understand.", raw),
+    );
+}
+
+// ── Admin helpers ─────────────────────────────────────────────────────────────
+
+/// Checks admin flag; sends error and returns false if not admin.
+fn require_admin(
+    state: &GameState,
+    client_id: ClientId,
+    entity: hecs::Entity,
+    registry: &OutputRegistry,
+) -> bool {
+    if state.world.get::<&AdminFlag>(entity).is_err() {
+        send_to_client(
+            registry,
+            client_id,
+            "You don't have that power.".to_string(),
+        );
+        false
+    } else {
+        true
+    }
+}
+
+fn get_player_room(state: &GameState, entity: hecs::Entity) -> Option<u64> {
+    state.world.get::<&Position>(entity).ok().map(|p| p.room_id)
+}
+
+// ── Admin command handlers ────────────────────────────────────────────────────
+
+fn handle_admin_goto(
+    state: &mut GameState,
+    client_id: ClientId,
+    room_id: u64,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    if state.room_registry.get(room_id).is_none() {
+        send_to_client(
+            registry,
+            client_id,
+            format!("Room {room_id} does not exist."),
+        );
+        return;
+    }
+
+    if let Ok(mut pos) = state.world.get::<&mut Position>(entity) {
+        pos.room_id = room_id;
+    }
+
+    if let Some(desc) = describe_room(state, room_id) {
+        send_to_client(
+            registry,
+            client_id,
+            format!("<dim>[Admin] Teleported to room {room_id}.</dim>\n\n{desc}"),
+        );
+    }
+}
+
+fn handle_admin_dig(
+    state: &mut GameState,
+    client_id: ClientId,
+    dir: Direction,
+    room_name: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(current_room_id) = get_player_room(state, entity) else {
+        return;
+    };
+
+    // Make sure the direction is not already occupied.
+    if state
+        .room_registry
+        .resolve_exit(current_room_id, dir)
+        .is_some()
+    {
+        send_to_client(
+            registry,
+            client_id,
+            format!("There is already an exit to the {} from here.", dir),
+        );
+        return;
+    }
+
+    let new_id = state.next_room_id;
+    state.next_room_id += 1;
+
+    let return_dir = dir.opposite();
+    let new_room = Room {
+        id: new_id,
+        name: room_name.clone(),
+        description: "No description yet.".to_string(),
+        exits: std::collections::HashMap::from([(
+            return_dir,
+            Exit {
+                destination_room_id: current_room_id,
+            },
+        )]),
+    };
+
+    // Add forward exit in the current room.
+    if let Some(current) = state.room_registry.get_mut(current_room_id) {
+        current.exits.insert(
+            dir,
+            Exit {
+                destination_room_id: new_id,
+            },
+        );
+    }
+    state.room_registry.insert(new_room.clone());
+
+    // Queue DB persists.
+    state.pending_admin_ops.push(AdminDbOp::UpsertExit {
+        room_id: current_room_id,
+        dir,
+        dest_id: new_id,
+    });
+    state
+        .pending_admin_ops
+        .push(AdminDbOp::CreateRoom(new_room));
+
+    send_to_client(
+        registry, client_id,
+        format!(
+            "<dim>[Admin] Room #{new_id} '{room_name}' created to the {dir}. Return exit: {return_dir}.</dim>"
+        ),
+    );
+}
+
+fn handle_admin_link(
+    state: &mut GameState,
+    client_id: ClientId,
+    dir: Direction,
+    dest_id: u64,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(current_room_id) = get_player_room(state, entity) else {
+        return;
+    };
+
+    if state.room_registry.get(dest_id).is_none() {
+        send_to_client(
+            registry,
+            client_id,
+            format!("Room {dest_id} does not exist."),
+        );
+        return;
+    }
+    if state
+        .room_registry
+        .resolve_exit(current_room_id, dir)
+        .is_some()
+    {
+        send_to_client(
+            registry,
+            client_id,
+            format!("There is already an exit to the {} from here.", dir),
+        );
+        return;
+    }
+
+    if let Some(current) = state.room_registry.get_mut(current_room_id) {
+        current.exits.insert(
+            dir,
+            Exit {
+                destination_room_id: dest_id,
+            },
+        );
+    }
+    state.pending_admin_ops.push(AdminDbOp::UpsertExit {
+        room_id: current_room_id,
+        dir,
+        dest_id,
+    });
+
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] Exit {} → room {dest_id} added.</dim>", dir),
+    );
+}
+
+fn handle_admin_unlink(
+    state: &mut GameState,
+    client_id: ClientId,
+    dir: Direction,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(current_room_id) = get_player_room(state, entity) else {
+        return;
+    };
+
+    if state
+        .room_registry
+        .resolve_exit(current_room_id, dir)
+        .is_none()
+    {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No exit to the {} from here.", dir),
+        );
+        return;
+    }
+
+    if let Some(current) = state.room_registry.get_mut(current_room_id) {
+        current.exits.remove(&dir);
+    }
+    state.pending_admin_ops.push(AdminDbOp::DeleteExit {
+        room_id: current_room_id,
+        dir,
+    });
+
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] Exit {} removed.</dim>", dir),
+    );
+}
+
+fn handle_admin_rename(
+    state: &mut GameState,
+    client_id: ClientId,
+    new_name: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(room_id) = get_player_room(state, entity) else {
+        return;
+    };
+
+    let description = if let Some(room) = state.room_registry.get_mut(room_id) {
+        let old_name = std::mem::replace(&mut room.name, new_name.clone());
+        let _ = old_name;
+        room.description.clone()
+    } else {
+        return;
+    };
+
+    state.pending_admin_ops.push(AdminDbOp::UpdateRoom {
+        id: room_id,
+        name: new_name.clone(),
+        description,
+    });
+
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] Room renamed to '{new_name}'.</dim>"),
+    );
+}
+
+fn handle_admin_redesc(
+    state: &mut GameState,
+    client_id: ClientId,
+    new_desc: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(room_id) = get_player_room(state, entity) else {
+        return;
+    };
+
+    let name = if let Some(room) = state.room_registry.get_mut(room_id) {
+        room.description = new_desc.clone();
+        room.name.clone()
+    } else {
+        return;
+    };
+
+    state.pending_admin_ops.push(AdminDbOp::UpdateRoom {
+        id: room_id,
+        name,
+        description: new_desc,
+    });
+
+    send_to_client(
+        registry,
+        client_id,
+        "<dim>[Admin] Room description updated.</dim>".to_string(),
+    );
+}
+
+fn handle_admin_roominfo(state: &GameState, client_id: ClientId, registry: &OutputRegistry) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if state.world.get::<&AdminFlag>(entity).is_err() {
+        send_to_client(
+            registry,
+            client_id,
+            "You don't have that power.".to_string(),
+        );
+        return;
+    }
+
+    let Some(room_id) = get_player_room(state, entity) else {
+        return;
+    };
+    let Some(room) = state.room_registry.get(room_id) else {
+        return;
+    };
+
+    let mut lines = vec![
+        "<yellow>=== Room Info ===</yellow>".to_string(),
+        format!("  ID   : {room_id}"),
+        format!("  Name : {}", room.name),
+        format!("  Desc : {}", room.description),
+        "  Exits:".to_string(),
+    ];
+    let mut dirs: Vec<_> = room.exits.iter().collect();
+    dirs.sort_by_key(|(d, _)| d.to_string());
+    for (dir, exit) in dirs {
+        lines.push(format!(
+            "    {:<12} → room {}",
+            dir, exit.destination_room_id
+        ));
+    }
+    if room.exits.is_empty() {
+        lines.push("    (none)".to_string());
+    }
+
+    // Show items on the floor with their IDs so admins can use @iname / @idesc etc.
+    let mut floor_items: Vec<(i64, String)> = {
+        let mut q = state.world.query::<(&ItemId, &ItemName, &RoomContents)>();
+        q.iter()
+            .filter(|(_, (_, _, rc))| rc.room_id == room_id)
+            .map(|(_, (id, n, _))| (id.0, n.0.clone()))
+            .collect()
+    };
+    floor_items.sort_by_key(|(id, _)| *id);
+
+    if !floor_items.is_empty() {
+        lines.push("  Items:".to_string());
+        for (id, name) in floor_items {
+            lines.push(format!("    #{id:<6} {name}"));
+        }
+    }
+
+    send_to_client(registry, client_id, lines.join("\n"));
+}
+
+// ── Item edit helpers / handlers ──────────────────────────────────────────────
+
+/// Finds the ECS entity whose `ItemId` component matches `item_id`.
+/// Searches all item entities regardless of location.
+fn find_item_entity(world: &hecs::World, item_id: i64) -> Option<hecs::Entity> {
+    let mut q = world.query::<(&ItemId,)>();
+    q.iter().find(|(_, (id,))| id.0 == item_id).map(|(e, _)| e)
+}
+
+fn handle_admin_iname(
+    state: &mut GameState,
+    client_id: ClientId,
+    item_id: i64,
+    new_name: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(item_ent) = find_item_entity(&state.world, item_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No item with id #{item_id} is in the game right now."),
+        );
+        return;
+    };
+
+    if let Ok(mut n) = state.world.get::<&mut ItemName>(item_ent) {
+        n.0 = new_name.clone();
+    } else {
+        return;
+    }
+
+    state.pending_admin_ops.push(AdminDbOp::UpdateItemName {
+        id: item_id,
+        name: new_name.clone(),
+    });
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] Item #{item_id} renamed to '{new_name}'.</dim>"),
+    );
+}
+
+fn handle_admin_idesc(
+    state: &mut GameState,
+    client_id: ClientId,
+    item_id: i64,
+    new_desc: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(item_ent) = find_item_entity(&state.world, item_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No item with id #{item_id} is in the game right now."),
+        );
+        return;
+    };
+
+    if let Ok(mut d) = state.world.get::<&mut ItemDescription>(item_ent) {
+        d.0 = new_desc.clone();
+    } else {
+        return;
+    }
+
+    state.pending_admin_ops.push(AdminDbOp::UpdateItemDesc {
+        id: item_id,
+        description: new_desc,
+    });
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] Item #{item_id} description updated.</dim>"),
+    );
+}
+
+fn handle_admin_islot(
+    state: &mut GameState,
+    client_id: ClientId,
+    item_id: i64,
+    slot_str: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(item_ent) = find_item_entity(&state.world, item_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No item with id #{item_id} is in the game right now."),
+        );
+        return;
+    };
+
+    let lower = slot_str.to_lowercase();
+    if lower == "none" {
+        state.world.remove::<(ItemSlot,)>(item_ent).ok();
+        state.pending_admin_ops.push(AdminDbOp::UpdateItemSlot {
+            id: item_id,
+            equip_slot: None,
+        });
+        send_to_client(
+            registry,
+            client_id,
+            format!("<dim>[Admin] Item #{item_id} equip slot cleared.</dim>"),
+        );
+    } else if let Some(slot) = EquipSlot::from_str(&lower) {
+        state.world.insert(item_ent, (ItemSlot(slot),)).ok();
+        state.pending_admin_ops.push(AdminDbOp::UpdateItemSlot {
+            id: item_id,
+            equip_slot: Some(slot.to_string()),
+        });
+        send_to_client(
+            registry,
+            client_id,
+            format!(
+                "<dim>[Admin] Item #{item_id} slot set to {}.</dim>",
+                slot.label()
+            ),
+        );
+    } else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("Unknown slot '{}'. Use a slot name or 'none'.", slot_str),
+        );
+    }
+}
+
+fn handle_admin_ireq(
+    state: &mut GameState,
+    client_id: ClientId,
+    item_id: i64,
+    stat: String,
+    value: i32,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(item_ent) = find_item_entity(&state.world, item_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No item with id #{item_id} is in the game right now."),
+        );
+        return;
+    };
+
+    // Read current requirements (or start from zero).
+    let mut reqs = state
+        .world
+        .get::<&EquipRequirements>(item_ent)
+        .map(|r| *r)
+        .unwrap_or_default();
+
+    match stat.to_lowercase().as_str() {
+        "str" | "strength" => reqs.strength = value,
+        "dex" | "dexterity" => reqs.dexterity = value,
+        "knw" | "knowledge" => reqs.knowledge = value,
+        "level" | "lv" => reqs.level = value,
+        _ => {
+            send_to_client(
+                registry,
+                client_id,
+                "Unknown stat. Use: str, dex, knw, level".to_string(),
+            );
+            return;
+        }
+    }
+
+    state.world.insert(item_ent, (reqs,)).ok();
+    state.pending_admin_ops.push(AdminDbOp::UpdateItemReq {
+        id: item_id,
+        level: reqs.level,
+        strength: reqs.strength,
+        dexterity: reqs.dexterity,
+        knowledge: reqs.knowledge,
+    });
+
+    send_to_client(
+        registry,
+        client_id,
+        format!(
+            "<dim>[Admin] Item #{item_id} requirements: Lv {} STR {} DEX {} KNW {}.</dim>",
+            reqs.level, reqs.strength, reqs.dexterity, reqs.knowledge
+        ),
+    );
+}
+
+fn handle_admin_mitem(
+    state: &mut GameState,
+    client_id: ClientId,
+    spec: String,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(room_id) = get_player_room(state, entity) else {
+        return;
+    };
+
+    // Spec format: "name / description"  (description is optional).
+    let (name, description) = match spec.split_once('/') {
+        Some((n, d)) => (n.trim().to_string(), d.trim().to_string()),
+        None => (spec.trim().to_string(), "No description.".to_string()),
+    };
+
+    if name.is_empty() {
+        send_to_client(
+            registry,
+            client_id,
+            "Usage: @mitem <name> [/ <description>]".to_string(),
+        );
+        return;
+    }
+
+    let item_id = state.next_item_id;
+    state.next_item_id += 1;
+
+    let item_data = ItemData {
+        id: item_id,
+        name: name.clone(),
+        description: description.clone(),
+        equip_slot: None,
+        two_handed: false,
+        bag_capacity: None,
+        requirements: crate::item::EquipRequirements::default(),
+        location: ItemLocation::Room(room_id),
+    };
+
+    // Spawn into ECS.
+    state.world.spawn((
+        crate::components::ItemId(item_id),
+        crate::components::ItemName(name.clone()),
+        crate::components::ItemDescription(description),
+        RoomContents { room_id },
+    ));
+
+    // Queue DB persist.
+    state
+        .pending_admin_ops
+        .push(AdminDbOp::CreateItem(item_data));
+
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] '{name}' (#{item_id}) created in this room.</dim>"),
+    );
+}
+
+fn handle_admin_destroy(
+    state: &mut GameState,
+    client_id: ClientId,
+    target: &str,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(room_id) = get_player_room(state, entity) else {
+        return;
+    };
+
+    let target_lower = target.trim().to_lowercase();
+    let found = {
+        let mut q = state.world.query::<(&ItemName, &RoomContents)>();
+        q.iter()
+            .find(|(_, (n, rc))| {
+                rc.room_id == room_id && n.0.to_lowercase().contains(&target_lower)
+            })
+            .map(|(e, (n, _))| (e, n.0.clone()))
+    };
+
+    let Some((item_ent, item_name)) = found else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No item matching '{}' on the floor here.", target),
+        );
+        return;
+    };
+
+    let item_id = state.world.get::<&ItemId>(item_ent).ok().map(|id| id.0);
+
+    state.world.despawn(item_ent).ok();
+
+    if let Some(id) = item_id {
+        state.pending_admin_ops.push(AdminDbOp::DeleteItem(id));
+    }
+
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] '{item_name}' permanently destroyed.</dim>"),
+    );
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -788,7 +1823,8 @@ mod tests {
     fn move_valid_exit_updates_entity_position() {
         let (mut state, tx, mut rx, reg, _) = setup();
         tx.try_send(connect(1)).unwrap();
-        tx.try_send(PlayerInput::new(1, Command::Move(Direction::North))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Move(Direction::North)))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let entity = state.player_registry.get_entity(1).unwrap();
         let pos = state.world.get::<&Position>(entity).unwrap();
@@ -799,7 +1835,8 @@ mod tests {
     fn move_blocked_exit_sends_error_message() {
         let (mut state, tx, mut rx, reg, mut out_rx) = setup();
         tx.try_send(connect(1)).unwrap();
-        tx.try_send(PlayerInput::new(1, Command::Move(Direction::Down))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Move(Direction::Down)))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("no exit")));
@@ -810,7 +1847,8 @@ mod tests {
         let (mut state, tx, mut rx, reg, mut out_rx) = setup();
         tx.try_send(connect(1)).unwrap();
         tx.try_send(connect(2)).unwrap();
-        tx.try_send(PlayerInput::new(1, Command::Say("hi".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Say("hi".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("You say")));
@@ -835,7 +1873,8 @@ mod tests {
     fn unknown_command_sends_error_to_client() {
         let (mut state, tx, mut rx, reg, mut out_rx) = setup();
         tx.try_send(connect(1)).unwrap();
-        tx.try_send(PlayerInput::new(1, Command::Unknown("xyzzy".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Unknown("xyzzy".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("xyzzy")));
@@ -887,33 +1926,61 @@ mod tests {
     #[test]
     fn move_broadcasts_departure_to_same_room() {
         let (mut state, tx, mut rx, reg, mut out_rx1, mut out_rx2) = setup_two();
-        tx.try_send(PlayerInput::new(1, Command::Connect(CharacterData { name: "Mover".to_string(), ..Default::default() }))).unwrap();
+        tx.try_send(PlayerInput::new(
+            1,
+            Command::Connect(CharacterData {
+                name: "Mover".to_string(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
         tx.try_send(connect(2)).unwrap();
         process_input(&mut state, &mut rx, &reg);
         drain(&mut out_rx1);
         drain(&mut out_rx2);
 
-        tx.try_send(PlayerInput::new(1, Command::Move(Direction::North))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Move(Direction::North)))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
 
         let msgs2 = drain(&mut out_rx2);
-        assert!(msgs2.iter().any(|m| m.contains("Mover") && m.contains("leaves")));
+        assert!(msgs2
+            .iter()
+            .any(|m| m.contains("Mover") && m.contains("leaves")));
     }
 
     #[test]
     fn move_broadcasts_arrival_to_destination_room() {
         let (mut state, tx, mut rx, reg, mut out_rx1, mut out_rx2) = setup_two();
-        tx.try_send(PlayerInput::new(1, Command::Connect(CharacterData { name: "Mover".to_string(), ..Default::default() }))).unwrap();
-        tx.try_send(PlayerInput::new(2, Command::Connect(CharacterData { name: "Watcher".to_string(), room_id: 2, ..Default::default() }))).unwrap();
+        tx.try_send(PlayerInput::new(
+            1,
+            Command::Connect(CharacterData {
+                name: "Mover".to_string(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
+        tx.try_send(PlayerInput::new(
+            2,
+            Command::Connect(CharacterData {
+                name: "Watcher".to_string(),
+                room_id: 2,
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
         process_input(&mut state, &mut rx, &reg);
         drain(&mut out_rx1);
         drain(&mut out_rx2);
 
-        tx.try_send(PlayerInput::new(1, Command::Move(Direction::North))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Move(Direction::North)))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
 
         let msgs2 = drain(&mut out_rx2);
-        assert!(msgs2.iter().any(|m| m.contains("Mover") && m.contains("arrives")));
+        assert!(msgs2
+            .iter()
+            .any(|m| m.contains("Mover") && m.contains("arrives")));
     }
 
     #[test]
@@ -923,13 +1990,23 @@ mod tests {
         tx.try_send(PlayerInput::new(1, Command::AdminWho)).unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
-        assert!(msgs.iter().any(|m| m.contains("power") || m.contains("permission")));
+        assert!(msgs
+            .iter()
+            .any(|m| m.contains("power") || m.contains("permission")));
     }
 
     #[test]
     fn admin_who_lists_players_for_admin() {
         let (mut state, tx, mut rx, reg, mut out_rx) = setup();
-        tx.try_send(PlayerInput::new(1, Command::Connect(CharacterData { is_admin: true, name: "Admin".to_string(), ..Default::default() }))).unwrap();
+        tx.try_send(PlayerInput::new(
+            1,
+            Command::Connect(CharacterData {
+                is_admin: true,
+                name: "Admin".to_string(),
+                ..Default::default()
+            }),
+        ))
+        .unwrap();
         tx.try_send(PlayerInput::new(1, Command::AdminWho)).unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
@@ -965,7 +2042,8 @@ mod tests {
         let starting_room = crate::world::seed::STARTING_ROOM_ID;
         let item = spawn_floor_item(&mut state, starting_room, "a rusty dagger");
 
-        tx.try_send(PlayerInput::new(1, Command::Get("dagger".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Get("dagger".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
 
         assert!(state.world.get::<&InInventory>(item).is_ok());
@@ -981,7 +2059,8 @@ mod tests {
         process_input(&mut state, &mut rx, &reg);
         drain(&mut out_rx);
 
-        tx.try_send(PlayerInput::new(1, Command::Get("dragon".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Get("dragon".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("don't see")));
@@ -999,12 +2078,18 @@ mod tests {
 
         // Fill the bag to capacity.
         for i in 0..BASE_INVENTORY_LIMIT {
-            spawn_bag_item(&mut state, entity, &format!("item {i}"), EquipSlot::LeftHand);
+            spawn_bag_item(
+                &mut state,
+                entity,
+                &format!("item {i}"),
+                EquipSlot::LeftHand,
+            );
         }
         // Place one more on the floor.
         spawn_floor_item(&mut state, starting_room, "the straw that breaks");
 
-        tx.try_send(PlayerInput::new(1, Command::Get("straw".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Get("straw".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("full")));
@@ -1020,7 +2105,8 @@ mod tests {
         let entity = state.player_registry.get_entity(1).unwrap();
         let item = spawn_bag_item(&mut state, entity, "a copper coin", EquipSlot::LeftHand);
 
-        tx.try_send(PlayerInput::new(1, Command::Drop("coin".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Drop("coin".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
 
         assert!(state.world.get::<&RoomContents>(item).is_ok());
@@ -1036,7 +2122,8 @@ mod tests {
         process_input(&mut state, &mut rx, &reg);
         drain(&mut out_rx);
 
-        tx.try_send(PlayerInput::new(1, Command::Drop("nothing".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Drop("nothing".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("don't have")));
@@ -1052,7 +2139,8 @@ mod tests {
         let entity = state.player_registry.get_entity(1).unwrap();
         spawn_bag_item(&mut state, entity, "a blue gem", EquipSlot::Necklace);
 
-        tx.try_send(PlayerInput::new(1, Command::Inventory)).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Inventory))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         let combined = msgs.join("\n");
@@ -1071,7 +2159,8 @@ mod tests {
         let entity = state.player_registry.get_entity(1).unwrap();
         let item = spawn_bag_item(&mut state, entity, "a rusty sword", EquipSlot::LeftHand);
 
-        tx.try_send(PlayerInput::new(1, Command::Equip("sword".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Equip("sword".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
 
         let eq = state.world.get::<&Equipped>(item).unwrap();
@@ -1092,14 +2181,18 @@ mod tests {
         spawn_bag_item(&mut state, entity, "sword one", EquipSlot::LeftHand);
         spawn_bag_item(&mut state, entity, "sword two", EquipSlot::LeftHand);
 
-        tx.try_send(PlayerInput::new(1, Command::Equip("sword one".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Equip("sword one".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         drain(&mut out_rx);
 
-        tx.try_send(PlayerInput::new(1, Command::Equip("sword two".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Equip("sword two".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
-        assert!(msgs.iter().any(|m| m.contains("occupied") || m.contains("Unequip")));
+        assert!(msgs
+            .iter()
+            .any(|m| m.contains("occupied") || m.contains("Unequip")));
     }
 
     #[test]
@@ -1113,12 +2206,23 @@ mod tests {
         let ring1 = spawn_bag_item(&mut state, entity, "ring alpha", EquipSlot::Ring1);
         let ring2 = spawn_bag_item(&mut state, entity, "ring beta", EquipSlot::Ring1);
 
-        tx.try_send(PlayerInput::new(1, Command::Equip("ring alpha".to_string()))).unwrap();
-        tx.try_send(PlayerInput::new(1, Command::Equip("ring beta".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(
+            1,
+            Command::Equip("ring alpha".to_string()),
+        ))
+        .unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Equip("ring beta".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
 
-        assert_eq!(state.world.get::<&Equipped>(ring1).unwrap().slot, EquipSlot::Ring1);
-        assert_eq!(state.world.get::<&Equipped>(ring2).unwrap().slot, EquipSlot::Ring2);
+        assert_eq!(
+            state.world.get::<&Equipped>(ring1).unwrap().slot,
+            EquipSlot::Ring1
+        );
+        assert_eq!(
+            state.world.get::<&Equipped>(ring2).unwrap().slot,
+            EquipSlot::Ring2
+        );
         drain(&mut out_rx);
     }
 
@@ -1134,10 +2238,14 @@ mod tests {
             ItemName("a helm".to_string()),
             ItemDescription("A helm.".to_string()),
             ItemSlot(EquipSlot::Head),
-            Equipped { owner: entity, slot: EquipSlot::Head },
+            Equipped {
+                owner: entity,
+                slot: EquipSlot::Head,
+            },
         ));
 
-        tx.try_send(PlayerInput::new(1, Command::Unequip("head".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Unequip("head".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
 
         assert!(state.world.get::<&InInventory>(item).is_ok());
@@ -1157,10 +2265,13 @@ mod tests {
         state.world.spawn((
             ItemName("an ancient tome".to_string()),
             ItemDescription("Its pages are filled with forgotten lore.".to_string()),
-            RoomContents { room_id: starting_room },
+            RoomContents {
+                room_id: starting_room,
+            },
         ));
 
-        tx.try_send(PlayerInput::new(1, Command::Examine("tome".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Examine("tome".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         let combined = msgs.join("\n");
@@ -1179,7 +2290,10 @@ mod tests {
             ItemName("item equipped".to_string()),
             ItemDescription("Equipped.".to_string()),
             ItemSlot(EquipSlot::Head),
-            Equipped { owner: entity, slot: EquipSlot::Head },
+            Equipped {
+                owner: entity,
+                slot: EquipSlot::Head,
+            },
         ));
         assert_eq!(state.world.len(), 3); // player + 2 items
 
@@ -1196,7 +2310,10 @@ mod tests {
         drain(&mut out_rx);
 
         let entity = state.player_registry.get_entity(1).unwrap();
-        assert_eq!(effective_inventory_limit(&state.world, entity), BASE_INVENTORY_LIMIT);
+        assert_eq!(
+            effective_inventory_limit(&state.world, entity),
+            BASE_INVENTORY_LIMIT
+        );
 
         // Put a bag in the inventory.
         let bag = state.world.spawn((
@@ -1208,18 +2325,29 @@ mod tests {
         ));
 
         // Equip it.
-        tx.try_send(PlayerInput::new(1, Command::Equip("pouch".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Equip("pouch".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
 
-        assert_eq!(state.world.get::<&Equipped>(bag).unwrap().slot, EquipSlot::Bag1);
-        assert_eq!(effective_inventory_limit(&state.world, entity), BASE_INVENTORY_LIMIT + 5);
+        assert_eq!(
+            state.world.get::<&Equipped>(bag).unwrap().slot,
+            EquipSlot::Bag1
+        );
+        assert_eq!(
+            effective_inventory_limit(&state.world, entity),
+            BASE_INVENTORY_LIMIT + 5
+        );
 
         // Unequipping puts it back in the bag and drops the limit.
-        tx.try_send(PlayerInput::new(1, Command::Unequip("bag".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Unequip("bag".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
 
         assert!(state.world.get::<&InInventory>(bag).is_ok());
-        assert_eq!(effective_inventory_limit(&state.world, entity), BASE_INVENTORY_LIMIT);
+        assert_eq!(
+            effective_inventory_limit(&state.world, entity),
+            BASE_INVENTORY_LIMIT
+        );
     }
 
     #[test]
@@ -1230,7 +2358,12 @@ mod tests {
         drain(&mut out_rx);
 
         let entity = state.player_registry.get_entity(1).unwrap();
-        let expected_slots = [EquipSlot::Bag1, EquipSlot::Bag2, EquipSlot::Bag3, EquipSlot::Bag4];
+        let expected_slots = [
+            EquipSlot::Bag1,
+            EquipSlot::Bag2,
+            EquipSlot::Bag3,
+            EquipSlot::Bag4,
+        ];
 
         let mut bags = Vec::new();
         for i in 0..4 {
@@ -1242,7 +2375,8 @@ mod tests {
                 InInventory { owner: entity },
             ));
             bags.push(b);
-            tx.try_send(PlayerInput::new(1, Command::Equip(format!("bag {i}")))).unwrap();
+            tx.try_send(PlayerInput::new(1, Command::Equip(format!("bag {i}"))))
+                .unwrap();
         }
         process_input(&mut state, &mut rx, &reg);
 

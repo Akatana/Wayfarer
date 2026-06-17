@@ -14,6 +14,14 @@ pub struct CharacterData {
     pub max_hp: i32,
     pub mp: i32,
     pub max_mp: i32,
+    pub strength: i32,
+    pub dexterity: i32,
+    pub knowledge: i32,
+    pub level: i32,
+    pub experience: i32,
+    pub learning_points: i32,
+    /// Items in the character's inventory or equipped — loaded from DB at login.
+    pub items: Vec<crate::item::ItemData>,
 }
 
 impl Default for CharacterData {
@@ -26,8 +34,15 @@ impl Default for CharacterData {
             room_id: crate::world::seed::STARTING_ROOM_ID,
             hp: 100,
             max_hp: 100,
-            mp: 50,
-            max_mp: 50,
+            mp: 10,
+            max_mp: 10,
+            strength: 0,
+            dexterity: 0,
+            knowledge: 0,
+            level: 1,
+            experience: 0,
+            learning_points: 0,
+            items: Vec::new(),
         }
     }
 }
@@ -52,5 +67,16 @@ mod tests {
     #[test]
     fn default_is_not_admin() {
         assert!(!CharacterData::default().is_admin);
+    }
+
+    #[test]
+    fn default_starts_at_level_one_with_zero_base_stats() {
+        let d = CharacterData::default();
+        assert_eq!(d.level, 1);
+        assert_eq!(d.strength, 0);
+        assert_eq!(d.dexterity, 0);
+        assert_eq!(d.knowledge, 0);
+        assert_eq!(d.experience, 0);
+        assert_eq!(d.learning_points, 0);
     }
 }

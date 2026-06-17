@@ -1,153 +1,73 @@
-use std::collections::HashMap;
-
-use crate::components::{BagCapacity, ItemDescription, ItemName, ItemSlot, RoomContents};
-use crate::direction::Direction;
-use crate::item::EquipSlot;
-use crate::world::room::{Exit, Room, RoomRegistry};
+use crate::components::{
+    BagCapacity, ItemDescription, ItemId, ItemName, ItemSlot, RoomContents, TwoHanded,
+};
+use crate::item::{ItemData, ItemLocation};
+use crate::world::loader;
+use crate::world::room::RoomRegistry;
 
 /// The room_id where newly spawned players first appear.
 pub const STARTING_ROOM_ID: u64 = 1;
 
-/// Builds the initial room graph used during development.
+/// Returns the room registry built from the JSON room files.
 ///
-/// In production this will be replaced by a database load on startup.
-/// The layout is intentionally kept small so all exits can be verified
-/// in tests without external fixtures.
-///
-/// ```text
-///   [4: Old Road]
-///        |  S/N
-///   [2: North Gate]
-///        |  S/N
-///   [1: Town Square] --E/W-- [3: Market Street]
-/// ```
+/// Delegates to `loader::load_rooms`; kept as a named function so callers
+/// (including tests) have a stable import path.
 pub fn build_starting_rooms() -> RoomRegistry {
-    let mut registry = RoomRegistry::new();
-
-    registry.insert(Room {
-        id: 1,
-        name: "Town Square".to_string(),
-        description:
-            "A cobblestone square at the heart of the village. An <cyan>old well</cyan> sits at its centre."
-                .to_string(),
-        exits: HashMap::from([
-            (
-                Direction::North,
-                Exit {
-                    destination_room_id: 2,
-                },
-            ),
-            (
-                Direction::East,
-                Exit {
-                    destination_room_id: 3,
-                },
-            ),
-        ]),
-    });
-
-    registry.insert(Room {
-        id: 2,
-        name: "North Gate".to_string(),
-        description:
-            "Tall <bold>oak</bold> gates mark the northern boundary. A <dim>drowsy guard</dim> leans on his halberd."
-                .to_string(),
-        exits: HashMap::from([
-            (
-                Direction::South,
-                Exit {
-                    destination_room_id: 1,
-                },
-            ),
-            (
-                Direction::North,
-                Exit {
-                    destination_room_id: 4,
-                },
-            ),
-        ]),
-    });
-
-    registry.insert(Room {
-        id: 3,
-        name: "Market Street".to_string(),
-        description:
-            "Stalls line the narrow street — bread, leather, and curiosities jostle for space."
-                .to_string(),
-        exits: HashMap::from([(
-            Direction::West,
-            Exit {
-                destination_room_id: 1,
-            },
-        )]),
-    });
-
-    registry.insert(Room {
-        id: 4,
-        name: "Old Road".to_string(),
-        description:
-            "A dirt road winds north through tall grass. The village bell fades behind you."
-                .to_string(),
-        exits: HashMap::from([(
-            Direction::South,
-            Exit {
-                destination_room_id: 2,
-            },
-        )]),
-    });
-
-    registry
+    loader::load_rooms(std::path::Path::new("assets/rooms"))
 }
 
-/// Spawns the starter set of items into the world.
+/// Spawns room-item entities into the ECS world from DB-loaded `ItemData`.
 ///
-/// Called once from `game_loop::run()` after rooms are loaded. NOT called
-/// from `GameState::new()` so unit tests start with an empty world.
-pub fn seed_items(world: &mut hecs::World) {
-    // (name, description, room_id, equip_slot)
-    let equippable: &[(&str, &str, u64, EquipSlot)] = &[
-        ("a rusty sword",  "An old iron sword, pitted with rust. Still sharp enough to cut.", 1, EquipSlot::LeftHand),
-        ("a leather helm", "A simple helmet of boiled leather. Better than nothing.",         2, EquipSlot::Head),
-        ("a wooden shield","A round shield reinforced with iron rivets.",                      3, EquipSlot::RightHand),
-        ("an iron ring",   "A plain iron band with no markings.",                             4, EquipSlot::Ring1),
-        ("a wool cloak",   "A thick dark cloak, perfect for cold nights.",                    4, EquipSlot::Back),
-    ];
-    for &(name, desc, room_id, slot) in equippable {
-        world.spawn((
-            ItemName(name.to_string()),
-            ItemDescription(desc.to_string()),
-            ItemSlot(slot),
-            RoomContents { room_id },
-        ));
+/// Called once from `game_loop::run()` after the DB is seeded and room items
+/// are fetched. Only items whose location is `Room(_)` are expected here.
+pub fn spawn_items(world: &mut hecs::World, items: &[ItemData]) {
+    for item in items {
+        let room_id = match item.location {
+            ItemLocation::Room(id) => id,
+            _ => continue, // skip non-room items (shouldn't happen at startup)
+        };
+
+        let mut builder = hecs::EntityBuilder::new();
+        builder.add(ItemId(item.id));
+        builder.add(ItemName(item.name.clone()));
+        builder.add(ItemDescription(item.description.clone()));
+        builder.add(RoomContents { room_id });
+
+        if let Some(slot) = item.equip_slot {
+            builder.add(ItemSlot(slot));
+        }
+        if item.two_handed {
+            builder.add(TwoHanded);
+        }
+        if let Some(cap) = item.bag_capacity {
+            builder.add(BagCapacity(cap));
+        }
+        if item.requirements.has_any() {
+            builder.add(item.requirements.clone());
+        }
+
+        world.spawn(builder.build());
     }
-
-    // Non-equippable items (junk / currency).
-    world.spawn((
-        ItemName("some gold coins".to_string()),
-        ItemDescription("A small handful of gold coins, warm from the sun.".to_string()),
-        RoomContents { room_id: 1 },
-    ));
-
-    // Bags — equippable in Bag1..Bag4 slots, each expands inventory capacity.
-    world.spawn((
-        ItemName("a small pouch".to_string()),
-        ItemDescription("A leather pouch just big enough to hold a handful of odds and ends. (+5 slots)".to_string()),
-        ItemSlot(EquipSlot::Bag1),
-        BagCapacity(5),
-        RoomContents { room_id: 1 },
-    ));
-    world.spawn((
-        ItemName("a leather satchel".to_string()),
-        ItemDescription("A sturdy satchel with many interior pockets. (+10 slots)".to_string()),
-        ItemSlot(EquipSlot::Bag1),
-        BagCapacity(10),
-        RoomContents { room_id: 3 },
-    ));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::direction::Direction;
+    use crate::item::{EquipRequirements, EquipSlot, ItemLocation};
+
+    fn make_item(id: i64, room_id: u64) -> ItemData {
+        ItemData {
+            id,
+            name: format!("item {id}"),
+            description: "A test item.".to_string(),
+            equip_slot: None,
+            two_handed: false,
+            bag_capacity: None,
+            requirements: EquipRequirements::default(),
+            location: ItemLocation::Room(room_id),
+        }
+    }
 
     #[test]
     fn seed_contains_at_least_four_rooms() {
@@ -179,18 +99,60 @@ mod tests {
     }
 
     #[test]
-    fn seed_items_spawns_eight_items() {
-        let mut world = hecs::World::new();
-        seed_items(&mut world);
-        assert_eq!(world.len(), 8);
-    }
-
-    #[test]
     fn north_from_town_square_reaches_north_gate() {
         let registry = build_starting_rooms();
         assert_eq!(
             registry.resolve_exit(STARTING_ROOM_ID, Direction::North),
             Some(2)
         );
+    }
+
+    #[test]
+    fn spawn_items_creates_entities_for_each_room_item() {
+        let items = vec![make_item(1, 1), make_item(2, 1), make_item(3, 2)];
+        let mut world = hecs::World::new();
+        spawn_items(&mut world, &items);
+        assert_eq!(world.len(), 3);
+    }
+
+    #[test]
+    fn spawn_items_attaches_item_id_component() {
+        let items = vec![make_item(42, 1)];
+        let mut world = hecs::World::new();
+        spawn_items(&mut world, &items);
+        let id = world
+            .query::<(&ItemId,)>()
+            .iter()
+            .next()
+            .map(|(_, (id,))| id.0)
+            .unwrap();
+        assert_eq!(id, 42);
+    }
+
+    #[test]
+    fn spawn_items_attaches_equip_slot() {
+        let mut item = make_item(1, 1);
+        item.equip_slot = Some(EquipSlot::LeftHand);
+        let mut world = hecs::World::new();
+        spawn_items(&mut world, &[item]);
+        let has_slot = world.query::<(&ItemSlot,)>().iter().next().is_some();
+        assert!(has_slot);
+    }
+
+    #[test]
+    fn spawn_items_skips_non_room_items() {
+        let item = ItemData {
+            id: 1,
+            name: "carried".to_string(),
+            description: "In inventory.".to_string(),
+            equip_slot: None,
+            two_handed: false,
+            bag_capacity: None,
+            requirements: EquipRequirements::default(),
+            location: ItemLocation::Inventory { char_id: 1 },
+        };
+        let mut world = hecs::World::new();
+        spawn_items(&mut world, &[item]);
+        assert_eq!(world.len(), 0);
     }
 }

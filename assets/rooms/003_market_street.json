@@ -1,0 +1,9 @@
+{
+  "id": 3,
+  "name": "Market Street",
+  "description": "Stalls line the narrow street — bread, leather, and curiosities jostle for space.",
+  "exits": {
+    "west": 1
+  },
+  "items": [5, 6]
+}

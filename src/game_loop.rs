@@ -24,12 +24,34 @@ pub async fn run(
     mut deregister_rx: mpsc::Receiver<ClientId>,
     db: sea_orm::DatabaseConnection,
 ) {
+    // Load rooms from DB (seeds from JSON on first boot).
     let room_registry = crate::db::room::load_or_seed(&db)
         .await
         .expect("[GameLoop] Failed to load world from database");
 
+    // Load items: seed DB on first boot, then spawn room items into ECS.
+    let seed = crate::world::loader::load_seed(
+        std::path::Path::new("assets/rooms"),
+        std::path::Path::new("assets/items.json"),
+    );
+    crate::db::item::seed_if_empty(&db, &seed.item_defs, &seed.room_items)
+        .await
+        .expect("[GameLoop] Failed to seed items");
+    let room_items = crate::db::item::load_in_rooms(&db)
+        .await
+        .expect("[GameLoop] Failed to load room items");
+
+    let max_room_id = crate::db::room::max_id(&db)
+        .await
+        .expect("[GameLoop] Failed to fetch max room id");
+    let max_item_id = crate::db::item::max_id(&db)
+        .await
+        .expect("[GameLoop] Failed to fetch max item id");
+
     let mut state = GameState::with_rooms(room_registry);
-    crate::world::seed::seed_items(&mut state.world);
+    state.next_room_id = max_room_id + 1;
+    state.next_item_id = max_item_id + 1;
+    crate::world::seed::spawn_items(&mut state.world, &room_items);
 
     let mut output_registry: HashMap<ClientId, mpsc::Sender<String>> = HashMap::new();
     let mut ticker = interval(Duration::from_millis(TICK_DURATION_MS));
@@ -50,12 +72,71 @@ pub async fn run(
         }
 
         // Drain character saves queued by the previous tick's quit/save handlers.
-        // Each save is a fire-and-forget async task — the tick never blocks on I/O.
         for char_data in state.pending_saves.drain(..) {
             let db = db.clone();
             tokio::spawn(async move {
                 if let Err(e) = crate::db::character::save(&db, char_data).await {
                     eprintln!("[DB] Character save failed: {e}");
+                }
+            });
+        }
+
+        // Drain item location saves queued by the previous tick's item handlers.
+        for item_save in state.pending_item_saves.drain(..) {
+            let db = db.clone();
+            tokio::spawn(async move {
+                if let Err(e) = crate::db::item::save_location(&db, &item_save).await {
+                    eprintln!("[DB] Item save failed: {e}");
+                }
+            });
+        }
+
+        // Drain admin world/item operations queued by the previous tick.
+        for op in state.pending_admin_ops.drain(..) {
+            let db = db.clone();
+            tokio::spawn(async move {
+                use crate::game_state::AdminDbOp;
+                let result = match op {
+                    AdminDbOp::CreateRoom(room) => crate::db::room::create(&db, &room).await,
+                    AdminDbOp::UpdateRoom {
+                        id,
+                        name,
+                        description,
+                    } => crate::db::room::update(&db, id, &name, &description).await,
+                    AdminDbOp::UpsertExit {
+                        room_id,
+                        dir,
+                        dest_id,
+                    } => crate::db::room::upsert_exit(&db, room_id, dir, dest_id).await,
+                    AdminDbOp::DeleteExit { room_id, dir } => {
+                        crate::db::room::delete_exit(&db, room_id, dir).await
+                    }
+                    AdminDbOp::CreateItem(item) => crate::db::item::create(&db, &item).await,
+                    AdminDbOp::DeleteItem(id) => crate::db::item::delete(&db, id).await,
+                    AdminDbOp::UpdateItemName { id, name } => {
+                        crate::db::item::update_name(&db, id, &name).await
+                    }
+                    AdminDbOp::UpdateItemDesc { id, description } => {
+                        crate::db::item::update_description(&db, id, &description).await
+                    }
+                    AdminDbOp::UpdateItemSlot { id, equip_slot } => {
+                        crate::db::item::update_slot(&db, id, equip_slot.as_deref()).await
+                    }
+                    AdminDbOp::UpdateItemReq {
+                        id,
+                        level,
+                        strength,
+                        dexterity,
+                        knowledge,
+                    } => {
+                        crate::db::item::update_requirements(
+                            &db, id, level, strength, dexterity, knowledge,
+                        )
+                        .await
+                    }
+                };
+                if let Err(e) = result {
+                    eprintln!("[DB] Admin op failed: {e}");
                 }
             });
         }

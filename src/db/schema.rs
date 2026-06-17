@@ -22,27 +22,61 @@ pub async fn create_tables(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr
     db.execute(Statement::from_string(
         DbBackend::Sqlite,
         "CREATE TABLE IF NOT EXISTS characters (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            account_id INTEGER NOT NULL DEFAULT 0,
-            name       TEXT    NOT NULL UNIQUE,
-            room_id    INTEGER NOT NULL DEFAULT 1,
-            hp         INTEGER NOT NULL DEFAULT 100,
-            max_hp     INTEGER NOT NULL DEFAULT 100,
-            mp         INTEGER NOT NULL DEFAULT 50,
-            max_mp     INTEGER NOT NULL DEFAULT 50
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id      INTEGER NOT NULL DEFAULT 0,
+            name            TEXT    NOT NULL UNIQUE,
+            room_id         INTEGER NOT NULL DEFAULT 1,
+            hp              INTEGER NOT NULL DEFAULT 100,
+            max_hp          INTEGER NOT NULL DEFAULT 100,
+            mp              INTEGER NOT NULL DEFAULT 10,
+            max_mp          INTEGER NOT NULL DEFAULT 10,
+            strength        INTEGER NOT NULL DEFAULT 0,
+            dexterity       INTEGER NOT NULL DEFAULT 0,
+            knowledge       INTEGER NOT NULL DEFAULT 0,
+            level           INTEGER NOT NULL DEFAULT 1,
+            experience      INTEGER NOT NULL DEFAULT 0,
+            learning_points INTEGER NOT NULL DEFAULT 0
         )"
         .to_string(),
     ))
     .await?;
 
-    // Migration: add account_id to existing characters tables that predate this column.
-    // Fails silently on fresh DBs where the column is already in the CREATE TABLE DDL.
-    let _ = db
-        .execute(Statement::from_string(
-            DbBackend::Sqlite,
-            "ALTER TABLE characters ADD COLUMN account_id INTEGER NOT NULL DEFAULT 0".to_string(),
-        ))
-        .await;
+    // Additive migrations — fail silently on fresh DBs that already have the column.
+    for sql in [
+        "ALTER TABLE characters ADD COLUMN account_id      INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE characters ADD COLUMN strength        INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE characters ADD COLUMN dexterity       INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE characters ADD COLUMN knowledge       INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE characters ADD COLUMN level           INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE characters ADD COLUMN experience      INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE characters ADD COLUMN learning_points INTEGER NOT NULL DEFAULT 0",
+    ] {
+        let _ = db
+            .execute(Statement::from_string(DbBackend::Sqlite, sql.to_string()))
+            .await;
+    }
+
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        "CREATE TABLE IF NOT EXISTS items (
+            id              INTEGER PRIMARY KEY,
+            name            TEXT    NOT NULL,
+            description     TEXT    NOT NULL,
+            equip_slot      TEXT,
+            two_handed      INTEGER NOT NULL DEFAULT 0,
+            bag_capacity    INTEGER,
+            req_level       INTEGER NOT NULL DEFAULT 0,
+            req_strength    INTEGER NOT NULL DEFAULT 0,
+            req_dexterity   INTEGER NOT NULL DEFAULT 0,
+            req_knowledge   INTEGER NOT NULL DEFAULT 0,
+            location        TEXT    NOT NULL DEFAULT 'room',
+            room_id         INTEGER,
+            char_id         INTEGER,
+            equipped_slot   TEXT
+        )"
+        .to_string(),
+    ))
+    .await?;
 
     db.execute(Statement::from_string(
         DbBackend::Sqlite,

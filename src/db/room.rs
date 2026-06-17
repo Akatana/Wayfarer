@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement};
 
 use crate::direction::Direction;
+use crate::world::loader;
 use crate::world::room::{Exit, Room, RoomRegistry};
-use crate::world::seed::build_starting_rooms;
 
 /// Loads the world from the database.
 ///
@@ -30,8 +30,93 @@ pub async fn load_or_seed(db: &DatabaseConnection) -> Result<RoomRegistry, DbErr
     load(db).await
 }
 
+// ── Admin world-building operations ──────────────────────────────────────────
+
+/// Inserts a new room and all its exits. Does nothing if the id already exists.
+pub async fn create(db: &DatabaseConnection, room: &Room) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "INSERT OR IGNORE INTO rooms (id, name, description) VALUES (?, ?, ?)",
+        [
+            (room.id as i64).into(),
+            room.name.clone().into(),
+            room.description.clone().into(),
+        ],
+    ))
+    .await?;
+
+    for (dir, exit) in &room.exits {
+        upsert_exit(db, room.id, *dir, exit.destination_room_id).await?;
+    }
+    Ok(())
+}
+
+/// Updates the name and description of an existing room.
+pub async fn update(
+    db: &DatabaseConnection,
+    id: u64,
+    name: &str,
+    description: &str,
+) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "UPDATE rooms SET name=?, description=? WHERE id=?",
+        [name.into(), description.into(), (id as i64).into()],
+    ))
+    .await?;
+    Ok(())
+}
+
+/// Inserts or replaces a single exit.
+pub async fn upsert_exit(
+    db: &DatabaseConnection,
+    room_id: u64,
+    dir: Direction,
+    dest_id: u64,
+) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "INSERT OR REPLACE INTO exits (room_id, direction, destination_room_id) VALUES (?, ?, ?)",
+        [
+            (room_id as i64).into(),
+            dir.to_string().into(),
+            (dest_id as i64).into(),
+        ],
+    ))
+    .await?;
+    Ok(())
+}
+
+/// Removes a single exit.
+pub async fn delete_exit(
+    db: &DatabaseConnection,
+    room_id: u64,
+    dir: Direction,
+) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "DELETE FROM exits WHERE room_id=? AND direction=?",
+        [(room_id as i64).into(), dir.to_string().into()],
+    ))
+    .await?;
+    Ok(())
+}
+
+/// Returns the highest room id currently in the database, or 0 if the table is empty.
+pub async fn max_id(db: &DatabaseConnection) -> Result<u64, DbErr> {
+    let n: i64 = db
+        .query_one(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT COALESCE(MAX(id), 0) AS n FROM rooms".to_string(),
+        ))
+        .await?
+        .and_then(|r| r.try_get::<i64>("", "n").ok())
+        .unwrap_or(0);
+    Ok(n as u64)
+}
+
 async fn seed(db: &DatabaseConnection) -> Result<(), DbErr> {
-    let registry = build_starting_rooms();
+    let registry = loader::load_rooms(std::path::Path::new("assets/rooms"));
     for room in registry.iter() {
         db.execute(Statement::from_sql_and_values(
             DbBackend::Sqlite,

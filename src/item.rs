@@ -1,3 +1,87 @@
+// ── Runtime item types ────────────────────────────────────────────────────────
+
+/// Stat requirements that must be met before an item can be equipped.
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Deserialize)]
+pub struct EquipRequirements {
+    #[serde(default)]
+    pub level: i32,
+    #[serde(default)]
+    pub strength: i32,
+    #[serde(default)]
+    pub dexterity: i32,
+    #[serde(default)]
+    pub knowledge: i32,
+}
+
+impl EquipRequirements {
+    pub fn is_met_by(&self, stats: &crate::components::Stats) -> bool {
+        stats.level >= self.level
+            && stats.strength >= self.strength
+            && stats.dexterity >= self.dexterity
+            && stats.knowledge >= self.knowledge
+    }
+
+    pub fn has_any(&self) -> bool {
+        self.level > 0 || self.strength > 0 || self.dexterity > 0 || self.knowledge > 0
+    }
+
+    pub fn display(&self) -> String {
+        let mut parts = Vec::new();
+        if self.level > 0 {
+            parts.push(format!("Lv {}", self.level));
+        }
+        if self.strength > 0 {
+            parts.push(format!("STR {}", self.strength));
+        }
+        if self.dexterity > 0 {
+            parts.push(format!("DEX {}", self.dexterity));
+        }
+        if self.knowledge > 0 {
+            parts.push(format!("KNW {}", self.knowledge));
+        }
+        parts.join(", ")
+    }
+}
+
+/// Where an item currently lives.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ItemLocation {
+    Room(u64),
+    Inventory { char_id: i64 },
+    Equipped { char_id: i64, slot: EquipSlot },
+}
+
+impl ItemLocation {
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            ItemLocation::Room(_) => "room",
+            ItemLocation::Inventory { .. } => "inventory",
+            ItemLocation::Equipped { .. } => "equipped",
+        }
+    }
+}
+
+/// Full runtime description of an item, loaded from DB.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ItemData {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub equip_slot: Option<EquipSlot>,
+    pub two_handed: bool,
+    pub bag_capacity: Option<usize>,
+    pub requirements: EquipRequirements,
+    pub location: ItemLocation,
+}
+
+/// Queued item location update, drained between ticks like pending_saves.
+pub struct ItemLocationSave {
+    pub item_id: i64,
+    pub location: ItemLocation,
+}
+
+// ── Equipment slot identifiers ────────────────────────────────────────────────
+
 /// Equipment slot identifiers for the 16-slot paperdoll.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EquipSlot {

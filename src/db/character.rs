@@ -18,6 +18,12 @@ pub struct Model {
     pub max_hp: i32,
     pub mp: i32,
     pub max_mp: i32,
+    pub strength: i32,
+    pub dexterity: i32,
+    pub knowledge: i32,
+    pub level: i32,
+    pub experience: i32,
+    pub learning_points: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -75,8 +81,14 @@ pub async fn create_for_account(
         room_id: Set(STARTING_ROOM_ID as i64),
         hp: Set(100),
         max_hp: Set(100),
-        mp: Set(50),
-        max_mp: Set(50),
+        mp: Set(10),
+        max_mp: Set(10),
+        strength: Set(0),
+        dexterity: Set(0),
+        knowledge: Set(0),
+        level: Set(1),
+        experience: Set(0),
+        learning_points: Set(0),
         ..Default::default()
     };
 
@@ -112,6 +124,12 @@ pub async fn save(db: &DatabaseConnection, data: CharacterData) -> Result<(), Db
         active.max_hp = Set(data.max_hp);
         active.mp = Set(data.mp);
         active.max_mp = Set(data.max_mp);
+        active.strength = Set(data.strength);
+        active.dexterity = Set(data.dexterity);
+        active.knowledge = Set(data.knowledge);
+        active.level = Set(data.level);
+        active.experience = Set(data.experience);
+        active.learning_points = Set(data.learning_points);
         active.update(db).await?;
     }
     Ok(())
@@ -128,6 +146,13 @@ fn model_to_data(m: Model, is_admin: bool) -> CharacterData {
         max_hp: m.max_hp,
         mp: m.mp,
         max_mp: m.max_mp,
+        strength: m.strength,
+        dexterity: m.dexterity,
+        knowledge: m.knowledge,
+        level: m.level,
+        experience: m.experience,
+        learning_points: m.learning_points,
+        items: Vec::new(),
     }
 }
 

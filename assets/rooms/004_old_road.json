@@ -1,0 +1,9 @@
+{
+  "id": 4,
+  "name": "Old Road",
+  "description": "A dirt road winds north through tall grass. The village bell fades behind you.",
+  "exits": {
+    "south": 2
+  },
+  "items": [7, 8]
+}

@@ -25,6 +25,12 @@ pub struct Stats {
     pub max_hp: i32,
     pub mp: i32,
     pub max_mp: i32,
+    pub strength: i32,
+    pub dexterity: i32,
+    pub knowledge: i32,
+    pub level: i32,
+    pub experience: i32,
+    pub learning_points: i32,
 }
 
 impl Stats {
@@ -34,11 +40,43 @@ impl Stats {
             max_hp,
             mp: max_mp,
             max_mp,
+            strength: 0,
+            dexterity: 0,
+            knowledge: 0,
+            level: 1,
+            experience: 0,
+            learning_points: 0,
         }
     }
 
     pub fn is_alive(&self) -> bool {
         self.hp > 0
+    }
+
+    /// XP required to go from the current level to the next.
+    pub fn xp_to_next_level(&self) -> i32 {
+        self.level * 100
+    }
+
+    /// Adds experience and processes any level-ups.
+    /// Returns the number of levels gained (usually 0 or 1, rarely more).
+    /// On each level-up: +5 max HP, +10 Learning Points. XP carries over.
+    pub fn add_experience(&mut self, xp: i32) -> i32 {
+        self.experience += xp;
+        let mut levels_gained = 0;
+        loop {
+            let needed = self.xp_to_next_level();
+            if self.experience >= needed {
+                self.experience -= needed;
+                self.level += 1;
+                self.max_hp += 5;
+                self.learning_points += 10;
+                levels_gained += 1;
+            } else {
+                break;
+            }
+        }
+        levels_gained
     }
 }
 
@@ -59,6 +97,10 @@ pub struct CharacterId {
 /// Marker component present only on entities whose account has `is_admin = true`.
 /// Guards access to privileged in-game commands.
 pub struct AdminFlag;
+
+/// The database primary key of an item entity.
+/// Required so location changes can be persisted back to the DB.
+pub struct ItemId(pub i64);
 
 // ── Item components ───────────────────────────────────────────────────────────
 
@@ -107,12 +149,8 @@ mod tests {
 
     #[test]
     fn stats_is_alive_returns_false_at_zero_hp() {
-        let s = Stats {
-            hp: 0,
-            max_hp: 100,
-            mp: 50,
-            max_mp: 50,
-        };
+        let mut s = Stats::new(100, 10);
+        s.hp = 0;
         assert!(!s.is_alive());
     }
 
@@ -126,5 +164,56 @@ mod tests {
     fn position_stores_room_id() {
         let p = Position { room_id: 99 };
         assert_eq!(p.room_id, 99);
+    }
+
+    #[test]
+    fn stats_starts_at_level_one_with_zero_base_stats() {
+        let s = Stats::new(100, 10);
+        assert_eq!(s.level, 1);
+        assert_eq!(s.strength, 0);
+        assert_eq!(s.dexterity, 0);
+        assert_eq!(s.knowledge, 0);
+        assert_eq!(s.experience, 0);
+        assert_eq!(s.learning_points, 0);
+    }
+
+    #[test]
+    fn xp_to_next_level_scales_with_level() {
+        let s = Stats::new(100, 10);
+        assert_eq!(s.xp_to_next_level(), 100); // level 1 → 2 costs 100
+        let mut s2 = s.clone();
+        s2.level = 5;
+        assert_eq!(s2.xp_to_next_level(), 500);
+    }
+
+    #[test]
+    fn add_experience_levels_up_and_grants_lp() {
+        let mut s = Stats::new(100, 10);
+        let gained = s.add_experience(100);
+        assert_eq!(gained, 1);
+        assert_eq!(s.level, 2);
+        assert_eq!(s.learning_points, 10);
+        assert_eq!(s.max_hp, 105);
+        assert_eq!(s.experience, 0);
+    }
+
+    #[test]
+    fn add_experience_carries_over_excess_xp() {
+        let mut s = Stats::new(100, 10);
+        s.add_experience(250); // 100 for lv2, 200 for lv3, leftover = 250 - 100 - 200 = -50... wait
+                               // level 1→2: need 100, level 2→3: need 200 → total 300
+                               // 250 only covers level 1→2 (100 used, 150 leftover < 200)
+        assert_eq!(s.level, 2);
+        assert_eq!(s.experience, 150);
+    }
+
+    #[test]
+    fn add_experience_can_gain_multiple_levels_at_once() {
+        let mut s = Stats::new(100, 10);
+        s.add_experience(300); // 100 (lv1→2) + 200 (lv2→3) = 300 exactly
+        assert_eq!(s.level, 3);
+        assert_eq!(s.experience, 0);
+        assert_eq!(s.learning_points, 20);
+        assert_eq!(s.max_hp, 110);
     }
 }

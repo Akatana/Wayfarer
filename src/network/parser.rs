@@ -1,6 +1,10 @@
 use crate::command::Command;
 use crate::direction::Direction;
 
+fn parse_direction_word(s: &str) -> Option<Direction> {
+    s.parse::<Direction>().ok()
+}
+
 /// Parses a raw text line received from the network into a `Command`.
 ///
 /// Supports full direction names and common single-letter MUD abbreviations.
@@ -35,6 +39,55 @@ pub fn parse(input: &str) -> Command {
         "say" => Command::Say(rest.to_string()),
         "quit" | "exit" | "bye" => Command::Quit,
         "@who" => Command::AdminWho,
+        "@goto" => rest
+            .parse::<u64>()
+            .map(Command::AdminGoto)
+            .unwrap_or(Command::Unknown(input.to_string())),
+        "@dig" => {
+            let (dir_str, name) = rest.split_once(' ').unwrap_or((rest, ""));
+            match parse_direction_word(dir_str) {
+                Some(dir) if !name.trim().is_empty() => {
+                    Command::AdminDig(dir, name.trim().to_string())
+                }
+                _ => Command::Unknown(input.to_string()),
+            }
+        }
+        "@link" => {
+            let (dir_str, id_str) = rest.split_once(' ').unwrap_or((rest, ""));
+            match (parse_direction_word(dir_str), id_str.trim().parse::<u64>()) {
+                (Some(dir), Ok(id)) => Command::AdminLink(dir, id),
+                _ => Command::Unknown(input.to_string()),
+            }
+        }
+        "@unlink" => match parse_direction_word(rest) {
+            Some(dir) => Command::AdminUnlink(dir),
+            None => Command::Unknown(input.to_string()),
+        },
+        "@rename" if !rest.is_empty() => Command::AdminRename(rest.to_string()),
+        "@redesc" if !rest.is_empty() => Command::AdminRedesc(rest.to_string()),
+        "@roominfo" => Command::AdminRoomInfo,
+        "@mitem" if !rest.is_empty() => Command::AdminMitem(rest.to_string()),
+        "@destroy" if !rest.is_empty() => Command::AdminDestroy(rest.to_string()),
+        "@iname" | "@idesc" | "@islot" | "@ireq" => {
+            // All item-edit commands share the format: @cmd <id> <payload>
+            let (id_str, payload) = rest.split_once(' ').unwrap_or((rest, ""));
+            match id_str.parse::<i64>() {
+                Ok(id) if !payload.is_empty() => match &verb[1..] {
+                    "iname" => Command::AdminIname(id, payload.to_string()),
+                    "idesc" => Command::AdminIdesc(id, payload.to_string()),
+                    "islot" => Command::AdminIslot(id, payload.to_string()),
+                    "ireq" => {
+                        let (stat, val_str) = payload.split_once(' ').unwrap_or((payload, ""));
+                        match val_str.trim().parse::<i32>() {
+                            Ok(val) => Command::AdminIreq(id, stat.to_string(), val),
+                            Err(_) => Command::Unknown(input.to_string()),
+                        }
+                    }
+                    _ => Command::Unknown(input.to_string()),
+                },
+                _ => Command::Unknown(input.to_string()),
+            }
+        }
         _ => Command::Unknown(input.to_string()),
     }
 }
@@ -118,8 +171,14 @@ mod tests {
         assert_eq!(parse("equip sword"), Command::Equip("sword".to_string()));
         assert_eq!(parse("wear helm"), Command::Equip("helm".to_string()));
         assert_eq!(parse("unequip head"), Command::Unequip("head".to_string()));
-        assert_eq!(parse("remove shield"), Command::Unequip("shield".to_string()));
-        assert_eq!(parse("examine sword"), Command::Examine("sword".to_string()));
+        assert_eq!(
+            parse("remove shield"),
+            Command::Unequip("shield".to_string())
+        );
+        assert_eq!(
+            parse("examine sword"),
+            Command::Examine("sword".to_string())
+        );
         assert_eq!(parse("x ring"), Command::Examine("ring".to_string()));
     }
 
@@ -132,5 +191,105 @@ mod tests {
     #[test]
     fn parses_admin_who_command() {
         assert_eq!(parse("@who"), Command::AdminWho);
+    }
+
+    #[test]
+    fn parses_admin_goto() {
+        assert_eq!(parse("@goto 5"), Command::AdminGoto(5));
+        assert!(matches!(parse("@goto notanumber"), Command::Unknown(_)));
+    }
+
+    #[test]
+    fn parses_admin_dig() {
+        assert_eq!(
+            parse("@dig north Tower of Stars"),
+            Command::AdminDig(Direction::North, "Tower of Stars".to_string())
+        );
+        assert!(matches!(parse("@dig north"), Command::Unknown(_)));
+        assert!(matches!(parse("@dig banana Room"), Command::Unknown(_)));
+    }
+
+    #[test]
+    fn parses_admin_link() {
+        assert_eq!(
+            parse("@link east 3"),
+            Command::AdminLink(Direction::East, 3)
+        );
+        assert!(matches!(parse("@link east"), Command::Unknown(_)));
+    }
+
+    #[test]
+    fn parses_admin_unlink() {
+        assert_eq!(
+            parse("@unlink south"),
+            Command::AdminUnlink(Direction::South)
+        );
+        assert!(matches!(parse("@unlink"), Command::Unknown(_)));
+    }
+
+    #[test]
+    fn parses_admin_rename_and_redesc() {
+        assert_eq!(
+            parse("@rename Town Square"),
+            Command::AdminRename("Town Square".to_string())
+        );
+        assert_eq!(
+            parse("@redesc A vast open square."),
+            Command::AdminRedesc("A vast open square.".to_string())
+        );
+        assert!(matches!(parse("@rename"), Command::Unknown(_)));
+    }
+
+    #[test]
+    fn parses_admin_roominfo() {
+        assert_eq!(parse("@roominfo"), Command::AdminRoomInfo);
+    }
+
+    #[test]
+    fn parses_admin_mitem_and_destroy() {
+        assert_eq!(
+            parse("@mitem a silver key"),
+            Command::AdminMitem("a silver key".to_string())
+        );
+        assert_eq!(
+            parse("@destroy sword"),
+            Command::AdminDestroy("sword".to_string())
+        );
+        assert!(matches!(parse("@mitem"), Command::Unknown(_)));
+    }
+
+    #[test]
+    fn parses_admin_item_edit_commands() {
+        assert_eq!(
+            parse("@iname 42 a rusty blade"),
+            Command::AdminIname(42, "a rusty blade".to_string())
+        );
+        assert_eq!(
+            parse("@idesc 42 A sword forged in shadow."),
+            Command::AdminIdesc(42, "A sword forged in shadow.".to_string())
+        );
+        assert_eq!(
+            parse("@islot 42 lefthand"),
+            Command::AdminIslot(42, "lefthand".to_string())
+        );
+        assert_eq!(
+            parse("@islot 42 none"),
+            Command::AdminIslot(42, "none".to_string())
+        );
+        assert_eq!(
+            parse("@ireq 42 str 5"),
+            Command::AdminIreq(42, "str".to_string(), 5)
+        );
+        assert_eq!(
+            parse("@ireq 42 level 3"),
+            Command::AdminIreq(42, "level".to_string(), 3)
+        );
+        // Bad inputs
+        assert!(matches!(parse("@iname notanid name"), Command::Unknown(_)));
+        assert!(matches!(
+            parse("@ireq 42 str notanumber"),
+            Command::Unknown(_)
+        ));
+        assert!(matches!(parse("@iname 42"), Command::Unknown(_)));
     }
 }

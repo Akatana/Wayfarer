@@ -47,6 +47,32 @@ pub enum Command {
     Quit,
     /// List all online players (admin only).
     AdminWho,
+    /// Teleport to a room by id (admin only).
+    AdminGoto(u64),
+    /// Carve a new room in a direction and link it bidirectionally (admin only).
+    AdminDig(Direction, String),
+    /// Add an exit from the current room to an existing room (admin only).
+    AdminLink(Direction, u64),
+    /// Remove an exit from the current room (admin only).
+    AdminUnlink(Direction),
+    /// Rename the current room (admin only).
+    AdminRename(String),
+    /// Change the description of the current room (admin only).
+    AdminRedesc(String),
+    /// Show the room id, name, desc, and exits with destination ids (admin only).
+    AdminRoomInfo,
+    /// Materialize a new item in the current room (admin only): "name / description".
+    AdminMitem(String),
+    /// Remove and permanently delete a named item from the current room (admin only).
+    AdminDestroy(String),
+    /// Rename an item by id (admin only).
+    AdminIname(i64, String),
+    /// Set an item's description by id (admin only).
+    AdminIdesc(i64, String),
+    /// Set or clear an item's equip slot by id — "none" clears it (admin only).
+    AdminIslot(i64, String),
+    /// Set one stat requirement on an item by id: stat ∈ {str, dex, knw, level} (admin only).
+    AdminIreq(i64, String, i32),
     /// Input that could not be mapped to a known command.
     Unknown(String),
 }

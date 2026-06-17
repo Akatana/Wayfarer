@@ -1,0 +1,54 @@
+[
+  {
+    "id": 1,
+    "name": "a rusty sword",
+    "description": "An old iron sword, pitted with rust. Still sharp enough to cut.",
+    "equip_slot": "LeftHand",
+    "requirements": { "strength": 5 }
+  },
+  {
+    "id": 2,
+    "name": "some gold coins",
+    "description": "A small handful of gold coins, warm from the sun."
+  },
+  {
+    "id": 3,
+    "name": "a small pouch",
+    "description": "A leather pouch just big enough to hold a handful of odds and ends. (+5 slots)",
+    "equip_slot": "Bag1",
+    "bag_capacity": 5
+  },
+  {
+    "id": 4,
+    "name": "a leather helm",
+    "description": "A simple helmet of boiled leather. Better than nothing.",
+    "equip_slot": "Head",
+    "requirements": { "strength": 3 }
+  },
+  {
+    "id": 5,
+    "name": "a wooden shield",
+    "description": "A round shield reinforced with iron rivets.",
+    "equip_slot": "RightHand",
+    "requirements": { "strength": 5, "dexterity": 3 }
+  },
+  {
+    "id": 6,
+    "name": "a leather satchel",
+    "description": "A sturdy satchel with many interior pockets. (+10 slots)",
+    "equip_slot": "Bag1",
+    "bag_capacity": 10
+  },
+  {
+    "id": 7,
+    "name": "an iron ring",
+    "description": "A plain iron band with no markings.",
+    "equip_slot": "Ring1"
+  },
+  {
+    "id": 8,
+    "name": "a wool cloak",
+    "description": "A thick dark cloak, perfect for cold nights.",
+    "equip_slot": "Back"
+  }
+]

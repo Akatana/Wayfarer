@@ -2674,6 +2674,8 @@ dependencies = [
  "futures-util",
  "hecs",
  "sea-orm",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-test",
  "tokio-tungstenite",

@@ -180,7 +180,11 @@ pub(super) async fn char_select_phase(
 
         if let Ok(n) = lower.parse::<usize>() {
             if n >= 1 && n <= chars.len() {
-                return Some(chars[n - 1].clone());
+                let mut ch = chars[n - 1].clone();
+                ch.items = db::item::load_for_character(db, ch.id)
+                    .await
+                    .unwrap_or_default();
+                return Some(ch);
             }
             session.send("<red>Invalid selection.</red>\r\n").await?;
             continue;
@@ -235,7 +239,10 @@ async fn create_char_flow(
     };
 
     match db::character::create_for_account(db, account.id, &name, account.is_admin).await {
-        Ok(ch) => {
+        Ok(mut ch) => {
+            ch.items = db::item::load_for_character(db, ch.id)
+                .await
+                .unwrap_or_default();
             session
                 .send(&format!(
                     "<green>Character '{}' created!</green>\r\n",

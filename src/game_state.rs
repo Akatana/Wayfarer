@@ -1,9 +1,56 @@
 use crate::character::CharacterData;
 use crate::command::ClientId;
-use crate::components::{AdminFlag, CharacterId, ClientConnection, Name, Position, Stats};
+use crate::components::{
+    AdminFlag, BagCapacity, CharacterId, ClientConnection, Equipped, InInventory, ItemDescription,
+    ItemId, ItemName, ItemSlot, Name, Position, Stats, TwoHanded,
+};
+use crate::direction::Direction;
+use crate::item::{ItemData, ItemLocation, ItemLocationSave};
 use crate::world::player_registry::PlayerRegistry;
-use crate::world::room::RoomRegistry;
+use crate::world::room::{Room, RoomRegistry};
 use crate::world::seed::build_starting_rooms;
+
+/// A deferred database write queued by an admin command.
+/// Drained between ticks by the game loop — analogous to `pending_saves`.
+pub enum AdminDbOp {
+    CreateRoom(Room),
+    UpdateRoom {
+        id: u64,
+        name: String,
+        description: String,
+    },
+    UpsertExit {
+        room_id: u64,
+        dir: Direction,
+        dest_id: u64,
+    },
+    DeleteExit {
+        room_id: u64,
+        dir: Direction,
+    },
+    CreateItem(ItemData),
+    DeleteItem(i64),
+    UpdateItemName {
+        id: i64,
+        name: String,
+    },
+    UpdateItemDesc {
+        id: i64,
+        description: String,
+    },
+    /// `equip_slot` is the slot label string (e.g. "Left Hand"); `None` clears the slot.
+    UpdateItemSlot {
+        id: i64,
+        equip_slot: Option<String>,
+    },
+    UpdateItemReq {
+        id: i64,
+        level: i32,
+        strength: i32,
+        dexterity: i32,
+        knowledge: i32,
+    },
+}
 
 /// The single authoritative runtime state of the server.
 /// Lives entirely inside the game loop task — never shared across threads.
@@ -16,6 +63,14 @@ pub struct GameState {
     pub player_registry: PlayerRegistry,
     /// Characters waiting to be saved on the next inter-tick async drain.
     pub pending_saves: Vec<CharacterData>,
+    /// Item location changes waiting to be persisted on the next inter-tick drain.
+    pub pending_item_saves: Vec<ItemLocationSave>,
+    /// Admin world/item operations waiting to be persisted on the next inter-tick drain.
+    pub pending_admin_ops: Vec<AdminDbOp>,
+    /// Next available id for admin-created rooms. Set from DB max at startup.
+    pub next_room_id: u64,
+    /// Next available id for admin-created items. Set from DB max at startup.
+    pub next_item_id: i64,
 }
 
 impl GameState {
@@ -33,6 +88,10 @@ impl GameState {
             room_registry,
             player_registry: PlayerRegistry::new(),
             pending_saves: Vec::new(),
+            pending_item_saves: Vec::new(),
+            pending_admin_ops: Vec::new(),
+            next_room_id: 1001,
+            next_item_id: 1001,
         }
     }
 
@@ -44,6 +103,7 @@ impl GameState {
 
     /// Spawns a player entity from DB-loaded (or default) character data
     /// and registers the `ClientId → Entity` mapping.
+    /// Also spawns ECS entities for each item in `data.items` (inventory + equipped).
     pub fn spawn_player_from_data(
         &mut self,
         client_id: ClientId,
@@ -59,6 +119,12 @@ impl GameState {
                 max_hp: data.max_hp,
                 mp: data.mp,
                 max_mp: data.max_mp,
+                strength: data.strength,
+                dexterity: data.dexterity,
+                knowledge: data.knowledge,
+                level: data.level,
+                experience: data.experience,
+                learning_points: data.learning_points,
             },
             ClientConnection { client_id },
             CharacterId {
@@ -66,9 +132,47 @@ impl GameState {
                 account_id: data.account_id,
             },
         ));
+
         if data.is_admin {
             self.world.insert(entity, (AdminFlag,)).ok();
         }
+
+        // Spawn persistent items (inventory + equipped).
+        for item in &data.items {
+            let mut builder = hecs::EntityBuilder::new();
+            builder.add(ItemId(item.id));
+            builder.add(ItemName(item.name.clone()));
+            builder.add(ItemDescription(item.description.clone()));
+
+            match &item.location {
+                ItemLocation::Inventory { .. } => {
+                    builder.add(InInventory { owner: entity });
+                }
+                ItemLocation::Equipped { slot, .. } => {
+                    builder.add(Equipped {
+                        owner: entity,
+                        slot: *slot,
+                    });
+                }
+                ItemLocation::Room(_) => {} // shouldn't happen for player items
+            }
+
+            if let Some(slot) = item.equip_slot {
+                builder.add(ItemSlot(slot));
+            }
+            if item.two_handed {
+                builder.add(TwoHanded);
+            }
+            if let Some(cap) = item.bag_capacity {
+                builder.add(BagCapacity(cap));
+            }
+            if item.requirements.has_any() {
+                builder.add(item.requirements.clone());
+            }
+
+            self.world.spawn(builder.build());
+        }
+
         self.player_registry.register(client_id, entity);
         entity
     }
@@ -80,12 +184,35 @@ impl GameState {
 
     /// Extracts the current ECS state into a `CharacterData` ready for DB persistence.
     /// Returns `None` if any required component is missing (should not happen in practice).
+    /// Items are NOT included — they are persisted via `pending_item_saves`.
     pub fn extract_save_data(&self, entity: hecs::Entity) -> Option<CharacterData> {
         let room_id = self.world.get::<&Position>(entity).ok()?.room_id;
         let name = self.world.get::<&Name>(entity).ok()?.0.clone();
-        let (hp, max_hp, mp, max_mp) = {
+        let (
+            hp,
+            max_hp,
+            mp,
+            max_mp,
+            strength,
+            dexterity,
+            knowledge,
+            level,
+            experience,
+            learning_points,
+        ) = {
             let s = self.world.get::<&Stats>(entity).ok()?;
-            (s.hp, s.max_hp, s.mp, s.max_mp)
+            (
+                s.hp,
+                s.max_hp,
+                s.mp,
+                s.max_mp,
+                s.strength,
+                s.dexterity,
+                s.knowledge,
+                s.level,
+                s.experience,
+                s.learning_points,
+            )
         };
         let (id, account_id) = {
             let c = self.world.get::<&CharacterId>(entity).ok()?;
@@ -102,6 +229,13 @@ impl GameState {
             max_hp,
             mp,
             max_mp,
+            strength,
+            dexterity,
+            knowledge,
+            level,
+            experience,
+            learning_points,
+            items: Vec::new(),
         })
     }
 }
