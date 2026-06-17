@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
+use crate::components::{BagCapacity, ItemDescription, ItemName, ItemSlot, RoomContents};
 use crate::direction::Direction;
+use crate::item::EquipSlot;
 use crate::world::room::{Exit, Room, RoomRegistry};
 
 /// The room_id where newly spawned players first appear.
@@ -97,6 +99,52 @@ pub fn build_starting_rooms() -> RoomRegistry {
     registry
 }
 
+/// Spawns the starter set of items into the world.
+///
+/// Called once from `game_loop::run()` after rooms are loaded. NOT called
+/// from `GameState::new()` so unit tests start with an empty world.
+pub fn seed_items(world: &mut hecs::World) {
+    // (name, description, room_id, equip_slot)
+    let equippable: &[(&str, &str, u64, EquipSlot)] = &[
+        ("a rusty sword",  "An old iron sword, pitted with rust. Still sharp enough to cut.", 1, EquipSlot::LeftHand),
+        ("a leather helm", "A simple helmet of boiled leather. Better than nothing.",         2, EquipSlot::Head),
+        ("a wooden shield","A round shield reinforced with iron rivets.",                      3, EquipSlot::RightHand),
+        ("an iron ring",   "A plain iron band with no markings.",                             4, EquipSlot::Ring1),
+        ("a wool cloak",   "A thick dark cloak, perfect for cold nights.",                    4, EquipSlot::Back),
+    ];
+    for &(name, desc, room_id, slot) in equippable {
+        world.spawn((
+            ItemName(name.to_string()),
+            ItemDescription(desc.to_string()),
+            ItemSlot(slot),
+            RoomContents { room_id },
+        ));
+    }
+
+    // Non-equippable items (junk / currency).
+    world.spawn((
+        ItemName("some gold coins".to_string()),
+        ItemDescription("A small handful of gold coins, warm from the sun.".to_string()),
+        RoomContents { room_id: 1 },
+    ));
+
+    // Bags — equippable in Bag1..Bag4 slots, each expands inventory capacity.
+    world.spawn((
+        ItemName("a small pouch".to_string()),
+        ItemDescription("A leather pouch just big enough to hold a handful of odds and ends. (+5 slots)".to_string()),
+        ItemSlot(EquipSlot::Bag1),
+        BagCapacity(5),
+        RoomContents { room_id: 1 },
+    ));
+    world.spawn((
+        ItemName("a leather satchel".to_string()),
+        ItemDescription("A sturdy satchel with many interior pockets. (+10 slots)".to_string()),
+        ItemSlot(EquipSlot::Bag1),
+        BagCapacity(10),
+        RoomContents { room_id: 3 },
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,6 +176,13 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn seed_items_spawns_eight_items() {
+        let mut world = hecs::World::new();
+        seed_items(&mut world);
+        assert_eq!(world.len(), 8);
     }
 
     #[test]

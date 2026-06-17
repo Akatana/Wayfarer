@@ -60,6 +60,40 @@ pub struct CharacterId {
 /// Guards access to privileged in-game commands.
 pub struct AdminFlag;
 
+// ── Item components ───────────────────────────────────────────────────────────
+
+/// Player-facing name of an item entity (e.g. "a rusty sword").
+pub struct ItemName(pub String);
+
+/// Long-form text shown by the `examine` command.
+pub struct ItemDescription(pub String);
+
+/// The slot this item occupies when equipped. Items without this component
+/// cannot be equipped (they are junk / currency / quest items).
+pub struct ItemSlot(pub crate::item::EquipSlot);
+
+/// Marker: weapon requires both hands; blocks the RightHand slot while equipped.
+pub struct TwoHanded;
+
+/// Item location — lying on the floor of a room.
+pub struct RoomContents {
+    pub room_id: u64,
+}
+
+/// Item location — in a player's bag (not equipped, counts toward the 20-slot limit).
+pub struct InInventory {
+    pub owner: hecs::Entity,
+}
+
+/// Item location — worn or wielded by a player in a specific equipment slot.
+pub struct Equipped {
+    pub owner: hecs::Entity,
+    pub slot: crate::item::EquipSlot,
+}
+
+/// How many extra inventory slots this bag grants when equipped.
+pub struct BagCapacity(pub usize);
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -25,6 +25,13 @@ pub fn parse(input: &str) -> Command {
         "u" | "up" => Command::Move(Direction::Up),
         "d" | "down" => Command::Move(Direction::Down),
         "l" | "look" => Command::Look,
+        "get" | "take" => Command::Get(rest.to_string()),
+        "drop" => Command::Drop(rest.to_string()),
+        "inventory" | "inv" | "i" => Command::Inventory,
+        "equip" | "wear" | "wield" => Command::Equip(rest.to_string()),
+        "unequip" | "remove" | "unwear" | "unwield" => Command::Unequip(rest.to_string()),
+        "examine" | "x" | "ex" => Command::Examine(rest.to_string()),
+        "score" | "sc" => Command::Score,
         "say" => Command::Say(rest.to_string()),
         "quit" | "exit" | "bye" => Command::Quit,
         "@who" => Command::AdminWho,
@@ -98,6 +105,28 @@ mod tests {
     fn trims_leading_and_trailing_whitespace() {
         assert_eq!(parse("  north  "), Command::Move(Direction::North));
         assert_eq!(parse("  look  "), Command::Look);
+    }
+
+    #[test]
+    fn parses_item_commands() {
+        assert_eq!(parse("get sword"), Command::Get("sword".to_string()));
+        assert_eq!(parse("take coin"), Command::Get("coin".to_string()));
+        assert_eq!(parse("drop helm"), Command::Drop("helm".to_string()));
+        assert_eq!(parse("inventory"), Command::Inventory);
+        assert_eq!(parse("inv"), Command::Inventory);
+        assert_eq!(parse("i"), Command::Inventory);
+        assert_eq!(parse("equip sword"), Command::Equip("sword".to_string()));
+        assert_eq!(parse("wear helm"), Command::Equip("helm".to_string()));
+        assert_eq!(parse("unequip head"), Command::Unequip("head".to_string()));
+        assert_eq!(parse("remove shield"), Command::Unequip("shield".to_string()));
+        assert_eq!(parse("examine sword"), Command::Examine("sword".to_string()));
+        assert_eq!(parse("x ring"), Command::Examine("ring".to_string()));
+    }
+
+    #[test]
+    fn parses_score_command() {
+        assert_eq!(parse("score"), Command::Score);
+        assert_eq!(parse("sc"), Command::Score);
     }
 
     #[test]

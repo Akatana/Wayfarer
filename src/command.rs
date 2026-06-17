@@ -29,6 +29,20 @@ pub enum Command {
     Say(String),
     /// Request a description of the current room.
     Look,
+    /// Pick up a named item from the floor of the current room.
+    Get(String),
+    /// Drop a named item from the bag onto the floor.
+    Drop(String),
+    /// List bag contents and equipped items.
+    Inventory,
+    /// Equip a named item from the bag.
+    Equip(String),
+    /// Move an equipped item back into the bag (by slot name or item name).
+    Unequip(String),
+    /// Read the description of an item (floor, bag, or equipped).
+    Examine(String),
+    /// Display the player's own stats (HP, MP, location).
+    Score,
     /// Initiate a graceful disconnect and save.
     Quit,
     /// List all online players (admin only).

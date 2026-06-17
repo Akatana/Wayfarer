@@ -29,6 +29,8 @@ pub async fn run(
         .expect("[GameLoop] Failed to load world from database");
 
     let mut state = GameState::with_rooms(room_registry);
+    crate::world::seed::seed_items(&mut state.world);
+
     let mut output_registry: HashMap<ClientId, mpsc::Sender<String>> = HashMap::new();
     let mut ticker = interval(Duration::from_millis(TICK_DURATION_MS));
 
