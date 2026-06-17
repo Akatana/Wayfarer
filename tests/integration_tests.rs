@@ -305,7 +305,7 @@ fn say_broadcasts_to_players_in_same_room() {
         .unwrap();
     process_input(&mut state, &mut rx, &reg);
 
-    let all_msgs: Vec<String> = receivers.values_mut().flat_map(|rx| drain(rx)).collect();
+    let all_msgs: Vec<String> = receivers.values_mut().flat_map(drain).collect();
     assert!(all_msgs.iter().any(|m| m.contains("You say")));
     assert!(all_msgs.iter().any(|m| m.contains("Someone says")));
 }
