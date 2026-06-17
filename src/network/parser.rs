@@ -76,6 +76,26 @@ pub fn parse(input: &str) -> Command {
             .parse::<i64>()
             .map(Command::AdminNinfo)
             .unwrap_or(Command::Unknown(input.to_string())),
+        "balance" | "money" | "gold" | "wallet" => Command::Balance,
+        "quests" | "ql" => Command::QuestLog,
+        "@qlist" => Command::AdminQlist,
+        "@qinfo" => rest
+            .parse::<i64>()
+            .map(Command::AdminQinfo)
+            .unwrap_or(Command::Unknown(input.to_string())),
+        "@qgive" | "@qreset" => {
+            let (name, id_str) = rest.split_once(' ').unwrap_or((rest, ""));
+            match id_str.trim().parse::<i64>() {
+                Ok(id) if !name.is_empty() => {
+                    if verb == "@qgive" {
+                        Command::AdminQgive(name.to_string(), id)
+                    } else {
+                        Command::AdminQreset(name.to_string(), id)
+                    }
+                }
+                _ => Command::Unknown(input.to_string()),
+            }
+        }
         "@nname" | "@ndesc" | "@ngreet" | "@nhostile" | "@npatrol" => {
             let (id_str, payload) = rest.split_once(' ').unwrap_or((rest, ""));
             match id_str.parse::<i64>() {

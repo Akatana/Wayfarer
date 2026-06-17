@@ -184,6 +184,9 @@ pub(super) async fn char_select_phase(
                 ch.items = db::item::load_for_character(db, ch.id)
                     .await
                     .unwrap_or_default();
+                ch.quests = db::quest::load_player_quests(db, ch.id)
+                    .await
+                    .unwrap_or_default();
                 return Some(ch);
             }
             session.send("<red>Invalid selection.</red>\r\n").await?;
@@ -241,6 +244,9 @@ async fn create_char_flow(
     match db::character::create_for_account(db, account.id, &name, account.is_admin).await {
         Ok(mut ch) => {
             ch.items = db::item::load_for_character(db, ch.id)
+                .await
+                .unwrap_or_default();
+            ch.quests = db::quest::load_player_quests(db, ch.id)
                 .await
                 .unwrap_or_default();
             session

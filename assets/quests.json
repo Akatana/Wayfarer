@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1,
+    "name": "A Guard's Request",
+    "description": "The town guard wants you to check the roads beyond the gate and report back.",
+    "giver_npc_id": 1,
+    "giver_item_id": null,
+    "phases": [
+      {
+        "description": "Scout the roads north and west of town",
+        "objectives": [
+          { "type": "reach", "room_id": 2, "description": "Reach the Northern Gate" },
+          { "type": "reach", "room_id": 4, "description": "Reach the Western Crossroads" }
+        ],
+        "completion_npc_id": 1,
+        "completion_text": "Good work. The roads seem clear for now. But one more thing...",
+        "xp_reward": 50,
+        "lp_reward": 2
+      },
+      {
+        "description": "Speak with the hooded wanderer near the Northern Gate",
+        "objectives": [
+          { "type": "talk", "npc_id": 2, "description": "Speak with the hooded wanderer" }
+        ],
+        "completion_npc_id": 1,
+        "completion_text": "Interesting. I'll keep an eye on that one. You've done well, citizen.",
+        "xp_reward": 100,
+        "lp_reward": 5,
+        "copper_reward": 5000,
+        "item_rewards": [1]
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "name": "The Coin's Secret",
+    "description": "Something feels unusual about these gold coins. Perhaps someone in town knows their origin.",
+    "giver_npc_id": null,
+    "giver_item_id": 2,
+    "phases": [
+      {
+        "description": "Find someone who might know about these unusual coins",
+        "objectives": [
+          { "type": "talk", "npc_id": 2, "description": "Ask the hooded wanderer about the coins" }
+        ],
+        "completion_npc_id": 2,
+        "completion_text": "Ah, you found one of my coins. Keep it — you've earned it. The less said about where it came from, the better.",
+        "xp_reward": 75
+      }
+    ]
+  }
+]

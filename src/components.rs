@@ -157,6 +157,16 @@ pub struct PatrolRoute {
     pub index: usize,
 }
 
+// ── Currency component ────────────────────────────────────────────────────────
+
+/// A player's current wealth stored as raw copper (1g = 100s = 10,000c).
+pub struct Wallet(pub i64);
+
+// ── Quest components ──────────────────────────────────────────────────────────
+
+/// All quest states for a player entity. Always present on spawned players.
+pub struct PlayerQuests(pub Vec<crate::quest::PlayerQuestState>);
+
 #[cfg(test)]
 mod tests {
     use super::*;

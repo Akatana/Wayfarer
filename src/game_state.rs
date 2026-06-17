@@ -1,12 +1,15 @@
+use std::collections::HashMap;
+
 use crate::character::CharacterData;
 use crate::command::ClientId;
 use crate::components::{
     AdminFlag, BagCapacity, CharacterId, ClientConnection, Equipped, InInventory, ItemDescription,
-    ItemId, ItemName, ItemSlot, Name, Position, Stats, TwoHanded,
+    ItemId, ItemName, ItemSlot, Name, PlayerQuests, Position, Stats, TwoHanded, Wallet,
 };
 use crate::direction::Direction;
 use crate::item::{ItemData, ItemLocation, ItemLocationSave};
 use crate::npc::{NpcData, NpcRoomSave};
+use crate::quest::{QuestDef, QuestSave};
 use crate::world::player_registry::PlayerRegistry;
 use crate::world::room::{Room, RoomRegistry};
 use crate::world::seed::build_starting_rooms;
@@ -100,6 +103,10 @@ pub struct GameState {
     pub next_item_id: i64,
     /// Next available id for admin-created NPCs. Set from DB max at startup.
     pub next_npc_id: i64,
+    /// All loaded quest definitions keyed by quest id. Immutable after startup.
+    pub quest_defs: HashMap<i64, QuestDef>,
+    /// Player quest state changes waiting to be persisted on the next inter-tick drain.
+    pub pending_quest_saves: Vec<QuestSave>,
 }
 
 impl GameState {
@@ -123,6 +130,8 @@ impl GameState {
             next_room_id: 1001,
             next_item_id: 1001,
             next_npc_id: 1001,
+            quest_defs: HashMap::new(),
+            pending_quest_saves: Vec::new(),
         }
     }
 
@@ -167,6 +176,11 @@ impl GameState {
         if data.is_admin {
             self.world.insert(entity, (AdminFlag,)).ok();
         }
+
+        self.world
+            .insert(entity, (PlayerQuests(data.quests.clone()),))
+            .ok();
+        self.world.insert(entity, (Wallet(data.copper),)).ok();
 
         // Spawn persistent items (inventory + equipped).
         for item in &data.items {
@@ -250,6 +264,12 @@ impl GameState {
             (c.db_id, c.account_id)
         };
         let is_admin = self.world.get::<&AdminFlag>(entity).is_ok();
+        let copper = self
+            .world
+            .get::<&Wallet>(entity)
+            .ok()
+            .map(|w| w.0)
+            .unwrap_or(0);
         Some(CharacterData {
             id,
             account_id,
@@ -266,7 +286,9 @@ impl GameState {
             level,
             experience,
             learning_points,
+            copper,
             items: Vec::new(),
+            quests: Vec::new(),
         })
     }
 }

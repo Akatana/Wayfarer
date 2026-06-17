@@ -2,6 +2,7 @@ pub mod account;
 pub mod character;
 pub mod item;
 pub mod npc;
+pub mod quest;
 pub mod room;
 pub mod schema;
 

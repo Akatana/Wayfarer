@@ -71,7 +71,16 @@ pub(super) fn handle_move(
                 );
             }
 
-            if let Some(desc) = super::describe_room(state, new_room_id) {
+            // Check Reach objectives for the new room.
+            super::quest_mark_objective(
+                state,
+                entity,
+                client_id,
+                registry,
+                |obj| matches!(obj, crate::quest::QuestObjectiveDef::Reach { room_id, .. } if *room_id == new_room_id),
+            );
+
+            if let Some(desc) = super::describe_room(state, new_room_id, entity) {
                 send_to_client(
                     registry,
                     client_id,

@@ -24,6 +24,7 @@ pub struct Model {
     pub level: i32,
     pub experience: i32,
     pub learning_points: i32,
+    pub copper: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -130,6 +131,7 @@ pub async fn save(db: &DatabaseConnection, data: CharacterData) -> Result<(), Db
         active.level = Set(data.level);
         active.experience = Set(data.experience);
         active.learning_points = Set(data.learning_points);
+        active.copper = Set(data.copper);
         active.update(db).await?;
     }
     Ok(())
@@ -152,7 +154,9 @@ fn model_to_data(m: Model, is_admin: bool) -> CharacterData {
         level: m.level,
         experience: m.experience,
         learning_points: m.learning_points,
+        copper: m.copper,
         items: Vec::new(),
+        quests: Vec::new(),
     }
 }
 

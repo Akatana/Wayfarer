@@ -23,10 +23,10 @@ pub(super) fn handle_talk(
         q.iter()
             .filter(|(_, (_, pos, _))| pos.room_id == room_id)
             .find(|(_, (name, _, _))| name.0.to_lowercase().contains(&target_lower))
-            .map(|(e, (name, _, _))| (e, name.0.clone()))
+            .map(|(e, (name, _, npc_id))| (e, name.0.clone(), npc_id.0))
     };
 
-    let Some((npc_e, npc_name)) = found else {
+    let Some((npc_e, npc_name, npc_db_id)) = found else {
         send_to_client(
             registry,
             client_id,
@@ -35,6 +35,22 @@ pub(super) fn handle_talk(
         return;
     };
 
+    // Quest: turn in any ready quests for this NPC first.
+    super::quest_turn_in(state, entity, npc_db_id, client_id, registry);
+
+    // Quest: auto-accept new quests offered by this NPC.
+    super::quest_accept_from_npc(state, entity, npc_db_id, client_id, registry);
+
+    // Quest: mark any Talk objectives targeting this NPC as complete.
+    super::quest_mark_objective(
+        state,
+        entity,
+        client_id,
+        registry,
+        |obj| matches!(obj, crate::quest::QuestObjectiveDef::Talk { npc_id, .. } if *npc_id == npc_db_id),
+    );
+
+    // Show the NPC's greeting.
     let greeting = state
         .world
         .get::<&NpcGreeting>(npc_e)

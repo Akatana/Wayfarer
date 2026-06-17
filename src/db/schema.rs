@@ -35,7 +35,8 @@ pub async fn create_tables(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr
             knowledge       INTEGER NOT NULL DEFAULT 0,
             level           INTEGER NOT NULL DEFAULT 1,
             experience      INTEGER NOT NULL DEFAULT 0,
-            learning_points INTEGER NOT NULL DEFAULT 0
+            learning_points INTEGER NOT NULL DEFAULT 0,
+            copper          INTEGER NOT NULL DEFAULT 0
         )"
         .to_string(),
     ))
@@ -50,6 +51,7 @@ pub async fn create_tables(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr
         "ALTER TABLE characters ADD COLUMN level           INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE characters ADD COLUMN experience      INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE characters ADD COLUMN learning_points INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE characters ADD COLUMN copper          INTEGER NOT NULL DEFAULT 0",
     ] {
         let _ = db
             .execute(Statement::from_string(DbBackend::Sqlite, sql.to_string()))
@@ -124,6 +126,63 @@ pub async fn create_tables(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr
             destination_room_id INTEGER NOT NULL,
             PRIMARY KEY (room_id, direction),
             FOREIGN KEY (room_id) REFERENCES rooms(id)
+        )"
+        .to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        "CREATE TABLE IF NOT EXISTS quests (
+            id            INTEGER PRIMARY KEY,
+            name          TEXT    NOT NULL,
+            description   TEXT    NOT NULL,
+            giver_npc_id  INTEGER,
+            giver_item_id INTEGER
+        )"
+        .to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        "CREATE TABLE IF NOT EXISTS quest_phases (
+            quest_id          INTEGER NOT NULL,
+            phase_index       INTEGER NOT NULL,
+            description       TEXT    NOT NULL,
+            completion_npc_id INTEGER,
+            completion_text   TEXT    NOT NULL DEFAULT '',
+            xp_reward         INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (quest_id, phase_index)
+        )"
+        .to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        "CREATE TABLE IF NOT EXISTS quest_objectives (
+            quest_id    INTEGER NOT NULL,
+            phase_index INTEGER NOT NULL,
+            obj_index   INTEGER NOT NULL,
+            obj_type    TEXT    NOT NULL,
+            target_id   INTEGER NOT NULL,
+            description TEXT    NOT NULL,
+            PRIMARY KEY (quest_id, phase_index, obj_index)
+        )"
+        .to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        "CREATE TABLE IF NOT EXISTS player_quests (
+            char_id        INTEGER NOT NULL,
+            quest_id       INTEGER NOT NULL,
+            phase_index    INTEGER NOT NULL DEFAULT 0,
+            objectives_met TEXT    NOT NULL DEFAULT '[]',
+            status         TEXT    NOT NULL DEFAULT 'active',
+            PRIMARY KEY (char_id, quest_id)
         )"
         .to_string(),
     ))

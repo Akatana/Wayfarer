@@ -20,8 +20,12 @@ pub struct CharacterData {
     pub level: i32,
     pub experience: i32,
     pub learning_points: i32,
+    /// Wealth in raw copper (1g = 100s = 10,000c).
+    pub copper: i64,
     /// Items in the character's inventory or equipped — loaded from DB at login.
     pub items: Vec<crate::item::ItemData>,
+    /// Active quest states — loaded from DB at login.
+    pub quests: Vec<crate::quest::PlayerQuestState>,
 }
 
 impl Default for CharacterData {
@@ -42,7 +46,9 @@ impl Default for CharacterData {
             level: 1,
             experience: 0,
             learning_points: 0,
+            copper: 0,
             items: Vec::new(),
+            quests: Vec::new(),
         }
     }
 }

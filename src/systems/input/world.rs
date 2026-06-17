@@ -2,10 +2,11 @@ use crate::character::CharacterData;
 use crate::command::ClientId;
 use crate::components::{
     AdminFlag, CharacterId, ClientConnection, Equipped, InInventory, ItemDescription, ItemId,
-    ItemName, Name, NpcDescription, NpcId, Position, RoomContents, Stats,
+    ItemName, Name, NpcDescription, NpcId, PlayerQuests, Position, RoomContents, Stats, Wallet,
 };
 use crate::game_state::GameState;
 use crate::item::{ItemLocation, ItemLocationSave};
+use crate::quest::QuestStatus;
 use crate::systems::output::{send_to_client, OutputRegistry};
 
 pub(super) fn handle_connect(
@@ -21,7 +22,7 @@ pub(super) fn handle_connect(
     let room_id = state.world.get::<&Position>(entity).ok().map(|p| p.room_id);
 
     if let Some(rid) = room_id {
-        if let Some(desc) = super::describe_room(state, rid) {
+        if let Some(desc) = super::describe_room(state, rid, entity) {
             send_to_client(
                 registry,
                 client_id,
@@ -58,7 +59,7 @@ pub(super) fn handle_look(state: &GameState, client_id: ClientId, registry: &Out
         };
         pos.room_id
     };
-    if let Some(desc) = super::describe_room(state, room_id) {
+    if let Some(desc) = super::describe_room(state, room_id, entity) {
         send_to_client(registry, client_id, desc);
     }
 }
@@ -96,7 +97,7 @@ pub(super) fn handle_say(
 }
 
 pub(super) fn handle_examine(
-    state: &GameState,
+    state: &mut GameState,
     client_id: ClientId,
     target: &str,
     registry: &OutputRegistry,
@@ -163,6 +164,18 @@ pub(super) fn handle_examine(
             client_id,
             format!("<yellow>{}</yellow>\n   {}", name, desc),
         );
+
+        // Check for item-triggered quest start or Examine objective.
+        if let Ok(item_id) = state.world.get::<&ItemId>(item).map(|id| id.0) {
+            super::quest_accept_from_item(state, entity, item_id, client_id, registry);
+            super::quest_mark_objective(
+                state,
+                entity,
+                client_id,
+                registry,
+                |obj| matches!(obj, crate::quest::QuestObjectiveDef::Examine { item_id: id, .. } if *id == item_id),
+            );
+        }
         return;
     }
 
@@ -241,7 +254,95 @@ pub(super) fn handle_score(state: &GameState, client_id: ClientId, registry: &Ou
             s.strength, s.dexterity, s.knowledge
         ));
     }
+    if let Ok(w) = state.world.get::<&Wallet>(entity) {
+        lines.push(format!("Wallet: {}", crate::currency::format_copper(w.0)));
+    }
     lines.push(format!("Location: {}", room_name));
+
+    send_to_client(registry, client_id, lines.join("\n"));
+}
+
+pub(super) fn handle_balance(state: &GameState, client_id: ClientId, registry: &OutputRegistry) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    let copper = state
+        .world
+        .get::<&Wallet>(entity)
+        .ok()
+        .map(|w| w.0)
+        .unwrap_or(0);
+    send_to_client(
+        registry,
+        client_id,
+        format!("Wallet: {}", crate::currency::format_copper(copper)),
+    );
+}
+
+pub(super) fn handle_quest_log(state: &GameState, client_id: ClientId, registry: &OutputRegistry) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+
+    let Ok(pq) = state.world.get::<&PlayerQuests>(entity) else {
+        send_to_client(
+            registry,
+            client_id,
+            "<yellow>=== Quest Log ===</yellow>\n  (no quests)".to_string(),
+        );
+        return;
+    };
+
+    let active: Vec<_> =
+        pq.0.iter()
+            .filter(|s| s.status != QuestStatus::Completed)
+            .collect();
+
+    if active.is_empty() {
+        send_to_client(
+            registry,
+            client_id,
+            "<yellow>=== Quest Log ===</yellow>\n  (no active quests)".to_string(),
+        );
+        return;
+    }
+
+    let mut lines = vec!["<yellow>=== Quest Log ===</yellow>".to_string()];
+
+    for qs in &active {
+        let Some(def) = state.quest_defs.get(&qs.quest_id) else {
+            continue;
+        };
+        let status_label = match qs.status {
+            QuestStatus::Active => "<cyan>[Active]</cyan>",
+            QuestStatus::ReadyToTurnIn => "<yellow>[Ready to Turn In]</yellow>",
+            QuestStatus::Completed => "<green>[Complete]</green>",
+        };
+        lines.push(format!("\n{} {}", status_label, def.name));
+        lines.push(format!("  {}", def.description));
+
+        if let Some(phase) = def.phases.get(qs.phase) {
+            lines.push(format!(
+                "  Phase {}/{}: {}",
+                qs.phase + 1,
+                def.phases.len(),
+                phase.description
+            ));
+            for (i, obj) in phase.objectives.iter().enumerate() {
+                let met = qs.objectives_met.get(i).copied().unwrap_or(false);
+                let tick = if met { "<green>[x]</green>" } else { "[ ]" };
+                lines.push(format!("    {} {}", tick, obj.description()));
+            }
+            if qs.status == QuestStatus::ReadyToTurnIn {
+                if let Some(npc_id) = phase.completion_npc_id {
+                    lines.push(format!(
+                        "  <yellow>→ Return to NPC #{} to complete.</yellow>",
+                        npc_id
+                    ));
+                }
+            }
+        }
+    }
 
     send_to_client(registry, client_id, lines.join("\n"));
 }

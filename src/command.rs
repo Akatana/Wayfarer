@@ -93,6 +93,18 @@ pub enum Command {
     AdminNlist,
     /// Show detailed info on an NPC by id (admin).
     AdminNinfo(i64),
+    /// Show the player's current wallet balance.
+    Balance,
+    /// Display the player's active quests.
+    QuestLog,
+    /// List all loaded quest definitions (admin).
+    AdminQlist,
+    /// Show full details of a quest definition by id (admin).
+    AdminQinfo(i64),
+    /// Give a quest to an online player by name (admin).
+    AdminQgive(String, i64),
+    /// Reset an online player's quest to its start (admin).
+    AdminQreset(String, i64),
     /// Input that could not be mapped to a known command.
     Unknown(String),
 }

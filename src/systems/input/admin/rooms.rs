@@ -31,7 +31,7 @@ pub(crate) fn handle_admin_goto(
         pos.room_id = room_id;
     }
 
-    if let Some(desc) = super::super::describe_room(state, room_id) {
+    if let Some(desc) = super::super::describe_room(state, room_id, entity) {
         send_to_client(
             registry,
             client_id,

@@ -92,6 +92,18 @@ pub fn load_npcs(npcs_path: &Path) -> Vec<NpcData> {
     serde_json::from_str(&src).unwrap_or_else(|e| panic!("Invalid JSON in {:?}: {e}", npcs_path))
 }
 
+/// Loads quest definitions from `quests_path` (a JSON array of `QuestDef`).
+///
+/// Returns an empty list if the file does not exist; panics on malformed JSON.
+pub fn load_quests(quests_path: &Path) -> Vec<crate::quest::QuestDef> {
+    if !quests_path.exists() {
+        return Vec::new();
+    }
+    let src = std::fs::read_to_string(quests_path)
+        .unwrap_or_else(|e| panic!("Cannot read {:?}: {e}", quests_path));
+    serde_json::from_str(&src).unwrap_or_else(|e| panic!("Invalid JSON in {:?}: {e}", quests_path))
+}
+
 // ── Internals ─────────────────────────────────────────────────────────────────
 
 fn load_rooms_internal(rooms_dir: &Path) -> (RoomRegistry, HashMap<u64, Vec<i64>>) {

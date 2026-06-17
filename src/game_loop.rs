@@ -60,10 +60,22 @@ pub async fn run(
         .await
         .expect("[GameLoop] Failed to fetch max NPC id");
 
+    // Load quests: seed DB on first boot, then build the in-memory HashMap.
+    let quest_defs_vec =
+        crate::world::loader::load_quests(std::path::Path::new("assets/quests.json"));
+    crate::db::quest::seed_if_empty(&db, &quest_defs_vec)
+        .await
+        .expect("[GameLoop] Failed to seed quests");
+    let quest_defs: std::collections::HashMap<i64, crate::quest::QuestDef> = quest_defs_vec
+        .into_iter()
+        .map(|def| (def.id, def))
+        .collect();
+
     let mut state = GameState::with_rooms(room_registry);
     state.next_room_id = max_room_id + 1;
     state.next_item_id = max_item_id + 1;
     state.next_npc_id = max_npc_id + 1;
+    state.quest_defs = quest_defs;
     crate::world::seed::spawn_items(&mut state.world, &room_items);
     crate::world::seed::spawn_npcs(&mut state.world, &npcs);
 
@@ -113,6 +125,19 @@ pub async fn run(
                     crate::db::npc::update_room(&db, npc_save.npc_id, npc_save.room_id).await
                 {
                     eprintln!("[DB] NPC room save failed: {e}");
+                }
+            });
+        }
+
+        // Drain player quest state saves queued by the previous tick.
+        for quest_save in state.pending_quest_saves.drain(..) {
+            let db = db.clone();
+            tokio::spawn(async move {
+                if let Err(e) =
+                    crate::db::quest::save_player_quest(&db, quest_save.char_id, &quest_save.state)
+                        .await
+                {
+                    eprintln!("[DB] Quest save failed: {e}");
                 }
             });
         }
