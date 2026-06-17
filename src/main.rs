@@ -25,14 +25,13 @@ async fn main() {
     println!("[Wayfarer] Booting engine...");
 
     // ── Tasks ─────────────────────────────────────────────────────────────────
-    // Mock fires once at startup for smoke-testing; its completion does not
-    // affect server lifetime.
-    tokio::spawn(network::mock::run_mock_network(
-        command_tx.clone(),
-        register_tx.clone(),
-        deregister_tx.clone(),
-        db.clone(),
-    ));
+    // Uncomment to enable the mock client for local smoke-testing:
+    // tokio::spawn(network::mock::run_mock_network(
+    //     command_tx.clone(),
+    //     register_tx.clone(),
+    //     deregister_tx.clone(),
+    //     db.clone(),
+    // ));
 
     let tcp_handle = tokio::spawn(network::telnet::run_telnet_server(
         "0.0.0.0:4000",

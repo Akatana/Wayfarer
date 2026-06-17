@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod mock;
 pub mod parser;
 pub mod session;
