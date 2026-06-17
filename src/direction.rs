@@ -18,33 +18,33 @@ impl Direction {
     /// Mirrors the `Display` impl — the two must stay in sync.
     pub fn from_str(s: &str) -> Option<Direction> {
         match s {
-            "north"     => Some(Direction::North),
-            "south"     => Some(Direction::South),
-            "east"      => Some(Direction::East),
-            "west"      => Some(Direction::West),
+            "north" => Some(Direction::North),
+            "south" => Some(Direction::South),
+            "east" => Some(Direction::East),
+            "west" => Some(Direction::West),
             "northeast" => Some(Direction::NorthEast),
             "northwest" => Some(Direction::NorthWest),
             "southeast" => Some(Direction::SouthEast),
             "southwest" => Some(Direction::SouthWest),
-            "up"        => Some(Direction::Up),
-            "down"      => Some(Direction::Down),
-            _           => None,
+            "up" => Some(Direction::Up),
+            "down" => Some(Direction::Down),
+            _ => None,
         }
     }
 
     /// Returns the logical inverse of this direction (the exit you'd use to return).
     pub fn opposite(self) -> Direction {
         match self {
-            Direction::North     => Direction::South,
-            Direction::South     => Direction::North,
-            Direction::East      => Direction::West,
-            Direction::West      => Direction::East,
+            Direction::North => Direction::South,
+            Direction::South => Direction::North,
+            Direction::East => Direction::West,
+            Direction::West => Direction::East,
             Direction::NorthEast => Direction::SouthWest,
             Direction::NorthWest => Direction::SouthEast,
             Direction::SouthEast => Direction::NorthWest,
             Direction::SouthWest => Direction::NorthEast,
-            Direction::Up        => Direction::Down,
-            Direction::Down      => Direction::Up,
+            Direction::Up => Direction::Down,
+            Direction::Down => Direction::Up,
         }
     }
 }
@@ -52,16 +52,16 @@ impl Direction {
 impl std::fmt::Display for Direction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            Direction::North     => "north",
-            Direction::South     => "south",
-            Direction::East      => "east",
-            Direction::West      => "west",
+            Direction::North => "north",
+            Direction::South => "south",
+            Direction::East => "east",
+            Direction::West => "west",
             Direction::NorthEast => "northeast",
             Direction::NorthWest => "northwest",
             Direction::SouthEast => "southeast",
             Direction::SouthWest => "southwest",
-            Direction::Up        => "up",
-            Direction::Down      => "down",
+            Direction::Up => "up",
+            Direction::Down => "down",
         };
         write!(f, "{}", s)
     }
@@ -84,9 +84,16 @@ mod tests {
     #[test]
     fn opposite_is_its_own_inverse() {
         let dirs = [
-            Direction::North, Direction::South, Direction::East, Direction::West,
-            Direction::NorthEast, Direction::NorthWest, Direction::SouthEast,
-            Direction::SouthWest, Direction::Up, Direction::Down,
+            Direction::North,
+            Direction::South,
+            Direction::East,
+            Direction::West,
+            Direction::NorthEast,
+            Direction::NorthWest,
+            Direction::SouthEast,
+            Direction::SouthWest,
+            Direction::Up,
+            Direction::Down,
         ];
         for dir in dirs {
             assert_eq!(dir.opposite().opposite(), dir, "{dir} failed round-trip");

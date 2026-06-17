@@ -30,21 +30,17 @@ impl ActiveModelBehavior for ActiveModel {}
 /// Called from the session handler (network layer) so the game loop tick body
 /// never blocks on I/O.
 pub async fn load_or_create(db: &DatabaseConnection, name: &str) -> CharacterData {
-    if let Ok(Some(model)) = Entity::find()
-        .filter(Column::Name.eq(name))
-        .one(db)
-        .await
-    {
+    if let Ok(Some(model)) = Entity::find().filter(Column::Name.eq(name)).one(db).await {
         return model_to_data(model);
     }
 
     // New character
     let active = ActiveModel {
-        name:   Set(name.to_string()),
+        name: Set(name.to_string()),
         room_id: Set(1),
-        hp:     Set(100),
+        hp: Set(100),
         max_hp: Set(100),
-        mp:     Set(50),
+        mp: Set(50),
         max_mp: Set(50),
         ..Default::default()
     };
@@ -53,7 +49,10 @@ pub async fn load_or_create(db: &DatabaseConnection, name: &str) -> CharacterDat
         Ok(model) => model_to_data(model),
         Err(e) => {
             eprintln!("[DB] Failed to create character '{name}': {e}");
-            CharacterData { name: name.to_string(), ..Default::default() }
+            CharacterData {
+                name: name.to_string(),
+                ..Default::default()
+            }
         }
     }
 }
@@ -69,10 +68,10 @@ pub async fn save(db: &DatabaseConnection, data: CharacterData) -> Result<(), Db
     {
         let mut active: ActiveModel = model.into();
         active.room_id = Set(data.room_id as i64);
-        active.hp      = Set(data.hp);
-        active.max_hp  = Set(data.max_hp);
-        active.mp      = Set(data.mp);
-        active.max_mp  = Set(data.max_mp);
+        active.hp = Set(data.hp);
+        active.max_hp = Set(data.max_hp);
+        active.mp = Set(data.mp);
+        active.max_mp = Set(data.max_mp);
         active.update(db).await?;
     }
     Ok(())
@@ -80,11 +79,11 @@ pub async fn save(db: &DatabaseConnection, data: CharacterData) -> Result<(), Db
 
 fn model_to_data(m: Model) -> CharacterData {
     CharacterData {
-        name:   m.name,
+        name: m.name,
         room_id: m.room_id as u64,
-        hp:     m.hp,
+        hp: m.hp,
         max_hp: m.max_hp,
-        mp:     m.mp,
+        mp: m.mp,
         max_mp: m.max_mp,
     }
 }
@@ -94,8 +93,8 @@ fn model_to_data(m: Model) -> CharacterData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::Database;
     use crate::db::schema;
+    use sea_orm::Database;
 
     async fn in_memory_db() -> DatabaseConnection {
         let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -126,7 +125,7 @@ mod tests {
             .unwrap();
         let mut active: ActiveModel = model.into();
         active.room_id = Set(3);
-        active.hp      = Set(42);
+        active.hp = Set(42);
         active.update(&db).await.unwrap();
 
         let data = load_or_create(&db, "Frodo").await;

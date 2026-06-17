@@ -21,14 +21,16 @@ pub fn try_move(
         pos.room_id
     };
     let new_room_id = room_registry.resolve_exit(current_room_id, direction)?;
-    Some(Position { room_id: new_room_id })
+    Some(Position {
+        room_id: new_room_id,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use crate::world::room::{Exit, Room, RoomRegistry};
+    use std::collections::HashMap;
 
     fn two_room_registry() -> RoomRegistry {
         let mut reg = RoomRegistry::new();
@@ -36,17 +38,23 @@ mod tests {
             id: 1,
             name: "Start".to_string(),
             description: "A room.".to_string(),
-            exits: HashMap::from([
-                (Direction::North, Exit { destination_room_id: 2 }),
-            ]),
+            exits: HashMap::from([(
+                Direction::North,
+                Exit {
+                    destination_room_id: 2,
+                },
+            )]),
         });
         reg.insert(Room {
             id: 2,
             name: "North Room".to_string(),
             description: "Another room.".to_string(),
-            exits: HashMap::from([
-                (Direction::South, Exit { destination_room_id: 1 }),
-            ]),
+            exits: HashMap::from([(
+                Direction::South,
+                Exit {
+                    destination_room_id: 1,
+                },
+            )]),
         });
         reg
     }
@@ -57,7 +65,10 @@ mod tests {
         let reg = two_room_registry();
         let entity = world.spawn((Position { room_id: 1 },));
 
-        assert_eq!(try_move(&world, &reg, entity, Direction::North), Some(Position { room_id: 2 }));
+        assert_eq!(
+            try_move(&world, &reg, entity, Direction::North),
+            Some(Position { room_id: 2 })
+        );
     }
 
     #[test]

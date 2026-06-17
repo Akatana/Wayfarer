@@ -29,7 +29,12 @@ pub struct Stats {
 
 impl Stats {
     pub fn new(max_hp: i32, max_mp: i32) -> Self {
-        Stats { hp: max_hp, max_hp, mp: max_mp, max_mp }
+        Stats {
+            hp: max_hp,
+            max_hp,
+            mp: max_mp,
+            max_mp,
+        }
     }
 
     pub fn is_alive(&self) -> bool {
@@ -57,7 +62,12 @@ mod tests {
 
     #[test]
     fn stats_is_alive_returns_false_at_zero_hp() {
-        let s = Stats { hp: 0, max_hp: 100, mp: 50, max_mp: 50 };
+        let s = Stats {
+            hp: 0,
+            max_hp: 100,
+            mp: 50,
+            max_mp: 50,
+        };
         assert!(!s.is_alive());
     }
 

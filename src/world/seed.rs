@@ -26,11 +26,21 @@ pub fn build_starting_rooms() -> RoomRegistry {
         id: 1,
         name: "Town Square".to_string(),
         description:
-            "A cobblestone square at the heart of the village. An old well sits at its centre."
+            "A cobblestone square at the heart of the village. An <cyan>old well</cyan> sits at its centre."
                 .to_string(),
         exits: HashMap::from([
-            (Direction::North, Exit { destination_room_id: 2 }),
-            (Direction::East, Exit { destination_room_id: 3 }),
+            (
+                Direction::North,
+                Exit {
+                    destination_room_id: 2,
+                },
+            ),
+            (
+                Direction::East,
+                Exit {
+                    destination_room_id: 3,
+                },
+            ),
         ]),
     });
 
@@ -38,11 +48,21 @@ pub fn build_starting_rooms() -> RoomRegistry {
         id: 2,
         name: "North Gate".to_string(),
         description:
-            "Tall oak gates mark the northern boundary. A drowsy guard leans on his halberd."
+            "Tall <bold>oak</bold> gates mark the northern boundary. A <dim>drowsy guard</dim> leans on his halberd."
                 .to_string(),
         exits: HashMap::from([
-            (Direction::South, Exit { destination_room_id: 1 }),
-            (Direction::North, Exit { destination_room_id: 4 }),
+            (
+                Direction::South,
+                Exit {
+                    destination_room_id: 1,
+                },
+            ),
+            (
+                Direction::North,
+                Exit {
+                    destination_room_id: 4,
+                },
+            ),
         ]),
     });
 
@@ -52,7 +72,12 @@ pub fn build_starting_rooms() -> RoomRegistry {
         description:
             "Stalls line the narrow street — bread, leather, and curiosities jostle for space."
                 .to_string(),
-        exits: HashMap::from([(Direction::West, Exit { destination_room_id: 1 })]),
+        exits: HashMap::from([(
+            Direction::West,
+            Exit {
+                destination_room_id: 1,
+            },
+        )]),
     });
 
     registry.insert(Room {
@@ -61,7 +86,12 @@ pub fn build_starting_rooms() -> RoomRegistry {
         description:
             "A dirt road winds north through tall grass. The village bell fades behind you."
                 .to_string(),
-        exits: HashMap::from([(Direction::South, Exit { destination_room_id: 2 })]),
+        exits: HashMap::from([(
+            Direction::South,
+            Exit {
+                destination_room_id: 2,
+            },
+        )]),
     });
 
     registry

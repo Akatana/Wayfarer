@@ -1,7 +1,7 @@
-use sea_orm::DatabaseConnection;
 use sea_orm::ConnectionTrait;
-use sea_orm::Statement;
+use sea_orm::DatabaseConnection;
 use sea_orm::DbBackend;
+use sea_orm::Statement;
 
 /// Creates all tables if they do not already exist.
 /// Safe to call on every startup — uses `IF NOT EXISTS` throughout.

@@ -5,7 +5,10 @@ use crate::command::{ClientId, Command, PlayerInput};
 use crate::components::{ClientConnection, Position};
 use crate::direction::Direction;
 use crate::game_state::GameState;
-use crate::systems::{movement, output::{send_to_client, OutputRegistry}};
+use crate::systems::{
+    movement,
+    output::{send_to_client, OutputRegistry},
+};
 
 /// Phase 1 of each tick: drains every pending command from the network channel
 /// without blocking. No `.await` calls are permitted here.
@@ -22,10 +25,10 @@ pub fn process_input(
 fn dispatch(state: &mut GameState, input: PlayerInput, registry: &OutputRegistry) {
     match input.command {
         Command::Connect(data) => handle_connect(state, input.client_id, data, registry),
-        Command::Look         => handle_look(state, input.client_id, registry),
-        Command::Move(dir)    => handle_move(state, input.client_id, dir, registry),
-        Command::Say(msg)     => handle_say(state, input.client_id, &msg, registry),
-        Command::Quit         => handle_quit(state, input.client_id, registry),
+        Command::Look => handle_look(state, input.client_id, registry),
+        Command::Move(dir) => handle_move(state, input.client_id, dir, registry),
+        Command::Say(msg) => handle_say(state, input.client_id, &msg, registry),
+        Command::Quit => handle_quit(state, input.client_id, registry),
         Command::Unknown(raw) => handle_unknown(input.client_id, &raw, registry),
     }
 }
@@ -49,10 +52,14 @@ fn handle_connect(
 }
 
 fn handle_look(state: &GameState, client_id: ClientId, registry: &OutputRegistry) {
-    let Some(entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
 
     let room_id = {
-        let Ok(pos) = state.world.get::<&Position>(entity) else { return };
+        let Ok(pos) = state.world.get::<&Position>(entity) else {
+            return;
+        };
         pos.room_id
     };
 
@@ -67,7 +74,9 @@ fn handle_move(
     direction: Direction,
     registry: &OutputRegistry,
 ) {
-    let Some(entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
 
     let new_pos = movement::try_move(&state.world, &state.room_registry, entity, direction);
 
@@ -86,16 +95,24 @@ fn handle_move(
             }
         }
         None => {
-            send_to_client(registry, client_id, "There's no exit in that direction.".to_string());
+            send_to_client(
+                registry,
+                client_id,
+                "There's no exit in that direction.".to_string(),
+            );
         }
     }
 }
 
 fn handle_say(state: &GameState, client_id: ClientId, message: &str, registry: &OutputRegistry) {
-    let Some(sender_entity) = state.player_registry.get_entity(client_id) else { return };
+    let Some(sender_entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
 
     let sender_room_id = {
-        let Ok(pos) = state.world.get::<&Position>(sender_entity) else { return };
+        let Ok(pos) = state.world.get::<&Position>(sender_entity) else {
+            return;
+        };
         pos.room_id
     };
 
@@ -118,7 +135,11 @@ fn handle_say(state: &GameState, client_id: ClientId, message: &str, registry: &
 }
 
 fn handle_quit(state: &mut GameState, client_id: ClientId, registry: &OutputRegistry) {
-    send_to_client(registry, client_id, "Farewell. The world fades around you...".to_string());
+    send_to_client(
+        registry,
+        client_id,
+        "Farewell. The world fades around you...".to_string(),
+    );
 
     if let Some(entity) = state.player_registry.remove(client_id) {
         if let Some(save_data) = state.extract_save_data(entity) {
@@ -148,7 +169,13 @@ mod tests {
     use crate::systems::output::OutputRegistry;
     use tokio::sync::mpsc;
 
-    fn setup() -> (GameState, mpsc::Sender<PlayerInput>, mpsc::Receiver<PlayerInput>, OutputRegistry, mpsc::Receiver<String>) {
+    fn setup() -> (
+        GameState,
+        mpsc::Sender<PlayerInput>,
+        mpsc::Receiver<PlayerInput>,
+        OutputRegistry,
+        mpsc::Receiver<String>,
+    ) {
         let (cmd_tx, cmd_rx) = mpsc::channel(32);
         let (out_tx, out_rx) = mpsc::channel(32);
         let mut registry = OutputRegistry::new();
@@ -163,7 +190,9 @@ mod tests {
 
     fn drain(rx: &mut mpsc::Receiver<String>) -> Vec<String> {
         let mut v = Vec::new();
-        while let Ok(m) = rx.try_recv() { v.push(m); }
+        while let Ok(m) = rx.try_recv() {
+            v.push(m);
+        }
         v
     }
 
@@ -213,7 +242,8 @@ mod tests {
     fn move_valid_exit_updates_entity_position() {
         let (mut state, tx, mut rx, reg, _) = setup();
         tx.try_send(connect(1)).unwrap();
-        tx.try_send(PlayerInput::new(1, Command::Move(Direction::North))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Move(Direction::North)))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let entity = state.player_registry.get_entity(1).unwrap();
         let pos = state.world.get::<&Position>(entity).unwrap();
@@ -224,7 +254,8 @@ mod tests {
     fn move_blocked_exit_sends_error_message() {
         let (mut state, tx, mut rx, reg, mut out_rx) = setup();
         tx.try_send(connect(1)).unwrap();
-        tx.try_send(PlayerInput::new(1, Command::Move(Direction::Down))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Move(Direction::Down)))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("no exit")));
@@ -235,7 +266,8 @@ mod tests {
         let (mut state, tx, mut rx, reg, mut out_rx) = setup();
         tx.try_send(connect(1)).unwrap();
         tx.try_send(connect(2)).unwrap();
-        tx.try_send(PlayerInput::new(1, Command::Say("hi".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Say("hi".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("You say")));
@@ -260,7 +292,8 @@ mod tests {
     fn unknown_command_sends_error_to_client() {
         let (mut state, tx, mut rx, reg, mut out_rx) = setup();
         tx.try_send(connect(1)).unwrap();
-        tx.try_send(PlayerInput::new(1, Command::Unknown("xyzzy".to_string()))).unwrap();
+        tx.try_send(PlayerInput::new(1, Command::Unknown("xyzzy".to_string())))
+            .unwrap();
         process_input(&mut state, &mut rx, &reg);
         let msgs = drain(&mut out_rx);
         assert!(msgs.iter().any(|m| m.contains("xyzzy")));

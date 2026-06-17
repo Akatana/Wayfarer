@@ -3,10 +3,10 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
+use super::parser;
 use crate::character::CharacterData;
 use crate::command::{ClientId, Command, PlayerInput};
 use crate::db::character as char_db;
-use super::parser;
 
 const BANNER: &str = concat!(
     "*** Wayfarer MUD ***\n",
@@ -107,7 +107,11 @@ pub async fn handle_ws_session(
             output = output_rx.recv() => {
                 match output {
                     Some(text) => {
-                        if sink.send(Message::Text(text.into())).await.is_err() {
+                        if sink
+                            .send(Message::Text(crate::color::render(&text).into()))
+                            .await
+                            .is_err()
+                        {
                             break;
                         }
                     }
@@ -120,6 +124,8 @@ pub async fn handle_ws_session(
     // ── Phase 3: Cleanup ──────────────────────────────────────────────────────
     println!("[WS] Client {client_id} disconnected.");
     let _ = sink.send(Message::Close(None)).await;
-    let _ = command_tx.send(PlayerInput::new(client_id, Command::Quit)).await;
+    let _ = command_tx
+        .send(PlayerInput::new(client_id, Command::Quit))
+        .await;
     let _ = deregister_tx.send(client_id).await;
 }

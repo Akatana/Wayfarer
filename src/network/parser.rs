@@ -14,20 +14,20 @@ pub fn parse(input: &str) -> Command {
     };
 
     match verb.to_lowercase().as_str() {
-        "n" | "north"     => Command::Move(Direction::North),
-        "s" | "south"     => Command::Move(Direction::South),
-        "e" | "east"      => Command::Move(Direction::East),
-        "w" | "west"      => Command::Move(Direction::West),
+        "n" | "north" => Command::Move(Direction::North),
+        "s" | "south" => Command::Move(Direction::South),
+        "e" | "east" => Command::Move(Direction::East),
+        "w" | "west" => Command::Move(Direction::West),
         "ne" | "northeast" => Command::Move(Direction::NorthEast),
         "nw" | "northwest" => Command::Move(Direction::NorthWest),
         "se" | "southeast" => Command::Move(Direction::SouthEast),
         "sw" | "southwest" => Command::Move(Direction::SouthWest),
-        "u" | "up"        => Command::Move(Direction::Up),
-        "d" | "down"      => Command::Move(Direction::Down),
-        "l" | "look"      => Command::Look,
-        "say"             => Command::Say(rest.to_string()),
+        "u" | "up" => Command::Move(Direction::Up),
+        "d" | "down" => Command::Move(Direction::Down),
+        "l" | "look" => Command::Look,
+        "say" => Command::Say(rest.to_string()),
         "quit" | "exit" | "bye" => Command::Quit,
-        _                 => Command::Unknown(input.to_string()),
+        _ => Command::Unknown(input.to_string()),
     }
 }
 
@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn parses_full_direction_names() {
-        assert_eq!(parse("north"),     Command::Move(Direction::North));
+        assert_eq!(parse("north"), Command::Move(Direction::North));
         assert_eq!(parse("northeast"), Command::Move(Direction::NorthEast));
         assert_eq!(parse("southwest"), Command::Move(Direction::SouthWest));
     }
@@ -55,13 +55,16 @@ mod tests {
     #[test]
     fn parses_case_insensitively() {
         assert_eq!(parse("NORTH"), Command::Move(Direction::North));
-        assert_eq!(parse("Look"),  Command::Look);
-        assert_eq!(parse("QUIT"),  Command::Quit);
+        assert_eq!(parse("Look"), Command::Look);
+        assert_eq!(parse("QUIT"), Command::Quit);
     }
 
     #[test]
     fn parses_say_with_message() {
-        assert_eq!(parse("say hello there"), Command::Say("hello there".to_string()));
+        assert_eq!(
+            parse("say hello there"),
+            Command::Say("hello there".to_string())
+        );
     }
 
     #[test]
@@ -71,7 +74,7 @@ mod tests {
 
     #[test]
     fn parses_look_aliases() {
-        assert_eq!(parse("l"),    Command::Look);
+        assert_eq!(parse("l"), Command::Look);
         assert_eq!(parse("look"), Command::Look);
     }
 
@@ -79,17 +82,20 @@ mod tests {
     fn parses_quit_aliases() {
         assert_eq!(parse("quit"), Command::Quit);
         assert_eq!(parse("exit"), Command::Quit);
-        assert_eq!(parse("bye"),  Command::Quit);
+        assert_eq!(parse("bye"), Command::Quit);
     }
 
     #[test]
     fn unknown_input_wraps_in_unknown_variant() {
-        assert_eq!(parse("frobnicate"), Command::Unknown("frobnicate".to_string()));
+        assert_eq!(
+            parse("frobnicate"),
+            Command::Unknown("frobnicate".to_string())
+        );
     }
 
     #[test]
     fn trims_leading_and_trailing_whitespace() {
         assert_eq!(parse("  north  "), Command::Move(Direction::North));
-        assert_eq!(parse("  look  "),  Command::Look);
+        assert_eq!(parse("  look  "), Command::Look);
     }
 }

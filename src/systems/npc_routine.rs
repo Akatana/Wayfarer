@@ -11,9 +11,7 @@ pub const NPC_ROUTINE_INTERVAL_TICKS: u64 = 300;
 ///
 /// No `.await` calls are permitted here — all work must complete synchronously.
 pub fn npc_routine_system(world: &mut hecs::World, current_tick: u64) {
-    for (_entity, (routine, _position)) in
-        world.query_mut::<(&mut NpcRoutine, &Position)>()
-    {
+    for (_entity, (routine, _position)) in world.query_mut::<(&mut NpcRoutine, &Position)>() {
         let elapsed = current_tick.saturating_sub(routine.last_action_tick);
 
         if elapsed >= NPC_ROUTINE_INTERVAL_TICKS {
@@ -85,15 +83,23 @@ mod tests {
         let r1 = world.get::<&NpcRoutine>(npc1).unwrap();
         let r2 = world.get::<&NpcRoutine>(npc2).unwrap();
 
-        assert_eq!(r1.last_action_tick, 200, "npc1: only 200 ticks elapsed, should not fire");
-        assert_eq!(r2.last_action_tick, 400, "npc2: 400 ticks elapsed, should fire");
+        assert_eq!(
+            r1.last_action_tick, 200,
+            "npc1: only 200 ticks elapsed, should not fire"
+        );
+        assert_eq!(
+            r2.last_action_tick, 400,
+            "npc2: 400 ticks elapsed, should fire"
+        );
     }
 
     #[test]
     fn entity_without_position_is_ignored() {
         let mut world = hecs::World::new();
         // Spawn an NpcRoutine with no Position — should not be queried.
-        world.spawn((NpcRoutine { last_action_tick: 0 },));
+        world.spawn((NpcRoutine {
+            last_action_tick: 0,
+        },));
 
         // Must not panic.
         npc_routine_system(&mut world, 1000);

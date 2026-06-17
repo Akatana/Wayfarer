@@ -3,9 +3,9 @@ use std::sync::atomic::Ordering;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
-use crate::command::{ClientId, PlayerInput};
 use super::session::handle_session;
 use super::NEXT_CLIENT_ID;
+use crate::command::{ClientId, PlayerInput};
 
 /// Binds a TCP listener on `addr` and accepts connections indefinitely.
 ///

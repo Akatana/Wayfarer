@@ -29,17 +29,26 @@ pub async fn run_mock_network(
         ..Default::default()
     };
     command_tx
-        .send(PlayerInput::new(MOCK_CLIENT_ID, Command::Connect(char_data)))
+        .send(PlayerInput::new(
+            MOCK_CLIENT_ID,
+            Command::Connect(char_data),
+        ))
         .await
         .ok();
 
     // Scripted command sequence — two ticks (400 ms) apart.
     let script: &[(Duration, Command)] = &[
         (Duration::from_millis(400), Command::Look),
-        (Duration::from_millis(400), Command::Say("Hello, world!".to_string())),
+        (
+            Duration::from_millis(400),
+            Command::Say("Hello, world!".to_string()),
+        ),
         (Duration::from_millis(400), Command::Move(Direction::North)),
         (Duration::from_millis(400), Command::Look),
-        (Duration::from_millis(400), Command::Unknown("xyzzy".to_string())),
+        (
+            Duration::from_millis(400),
+            Command::Unknown("xyzzy".to_string()),
+        ),
         (Duration::from_millis(400), Command::Quit),
     ];
 

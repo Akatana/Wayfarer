@@ -44,11 +44,22 @@ impl GameState {
 
     /// Spawns a player entity from DB-loaded (or default) character data
     /// and registers the `ClientId → Entity` mapping.
-    pub fn spawn_player_from_data(&mut self, client_id: ClientId, data: &CharacterData) -> hecs::Entity {
+    pub fn spawn_player_from_data(
+        &mut self,
+        client_id: ClientId,
+        data: &CharacterData,
+    ) -> hecs::Entity {
         let entity = self.world.spawn((
-            Position { room_id: data.room_id },
+            Position {
+                room_id: data.room_id,
+            },
             Name(data.name.clone()),
-            Stats { hp: data.hp, max_hp: data.max_hp, mp: data.mp, max_mp: data.max_mp },
+            Stats {
+                hp: data.hp,
+                max_hp: data.max_hp,
+                mp: data.mp,
+                max_mp: data.max_mp,
+            },
             ClientConnection { client_id },
         ));
         self.player_registry.register(client_id, entity);
@@ -64,12 +75,19 @@ impl GameState {
     /// Returns `None` if any required component is missing (should not happen in practice).
     pub fn extract_save_data(&self, entity: hecs::Entity) -> Option<CharacterData> {
         let room_id = { self.world.get::<&Position>(entity).ok()?.room_id };
-        let name    = { self.world.get::<&Name>(entity).ok()?.0.clone() };
+        let name = { self.world.get::<&Name>(entity).ok()?.0.clone() };
         let (hp, max_hp, mp, max_mp) = {
             let s = self.world.get::<&Stats>(entity).ok()?;
             (s.hp, s.max_hp, s.mp, s.max_mp)
         };
-        Some(CharacterData { name, room_id, hp, max_hp, mp, max_mp })
+        Some(CharacterData {
+            name,
+            room_id,
+            hp,
+            max_hp,
+            mp,
+            max_mp,
+        })
     }
 }
 
@@ -82,8 +100,8 @@ impl Default for GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::seed::STARTING_ROOM_ID;
     use crate::components::Position;
+    use crate::world::seed::STARTING_ROOM_ID;
 
     #[test]
     fn initial_tick_is_zero() {
@@ -121,7 +139,11 @@ mod tests {
     #[test]
     fn spawn_player_from_data_places_entity_at_given_room() {
         let mut state = GameState::new();
-        let data = CharacterData { name: "Tester".to_string(), room_id: 3, ..Default::default() };
+        let data = CharacterData {
+            name: "Tester".to_string(),
+            room_id: 3,
+            ..Default::default()
+        };
         let entity = state.spawn_player_from_data(1, &data);
         let pos = state.world.get::<&Position>(entity).unwrap();
         assert_eq!(pos.room_id, 3);

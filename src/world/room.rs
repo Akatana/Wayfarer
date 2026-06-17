@@ -26,7 +26,11 @@ impl Room {
             "{}\n   {}\n[ Exits: {} ]",
             self.name,
             self.description,
-            if labels.is_empty() { "none".to_string() } else { labels.join(", ") }
+            if labels.is_empty() {
+                "none".to_string()
+            } else {
+                labels.join(", ")
+            }
         )
     }
 }
@@ -88,15 +92,30 @@ mod tests {
             name: "Room A".to_string(),
             description: "A plain room.".to_string(),
             exits: HashMap::from([
-                (Direction::North, Exit { destination_room_id: 2 }),
-                (Direction::East, Exit { destination_room_id: 3 }),
+                (
+                    Direction::North,
+                    Exit {
+                        destination_room_id: 2,
+                    },
+                ),
+                (
+                    Direction::East,
+                    Exit {
+                        destination_room_id: 3,
+                    },
+                ),
             ]),
         });
         reg.insert(Room {
             id: 2,
             name: "Room B".to_string(),
             description: "A second room.".to_string(),
-            exits: HashMap::from([(Direction::South, Exit { destination_room_id: 1 })]),
+            exits: HashMap::from([(
+                Direction::South,
+                Exit {
+                    destination_room_id: 1,
+                },
+            )]),
         });
         reg
     }

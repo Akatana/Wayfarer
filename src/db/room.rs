@@ -98,12 +98,23 @@ async fn load(db: &DatabaseConnection) -> Result<RoomRegistry, DbErr> {
             .unwrap_or_default()
             .into_iter()
             .filter_map(|(dir_str, dest_id)| {
-                Direction::from_str(&dir_str)
-                    .map(|d| (d, Exit { destination_room_id: dest_id }))
+                Direction::from_str(&dir_str).map(|d| {
+                    (
+                        d,
+                        Exit {
+                            destination_room_id: dest_id,
+                        },
+                    )
+                })
             })
             .collect();
 
-        registry.insert(Room { id: id as u64, name, description, exits });
+        registry.insert(Room {
+            id: id as u64,
+            name,
+            description,
+            exits,
+        });
     }
 
     Ok(registry)
@@ -141,7 +152,7 @@ mod tests {
         let registry = load_or_seed(&db).await.unwrap();
         assert_eq!(registry.resolve_exit(1, Direction::North), Some(2));
         assert_eq!(registry.resolve_exit(2, Direction::South), Some(1));
-        assert_eq!(registry.resolve_exit(1, Direction::West),  None);
+        assert_eq!(registry.resolve_exit(1, Direction::West), None);
     }
 
     #[tokio::test]
