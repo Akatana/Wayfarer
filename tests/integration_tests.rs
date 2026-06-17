@@ -128,7 +128,11 @@ fn ten_npcs_all_trigger_at_the_interval() {
         })
         .collect();
 
-    npc_routine_system(&mut state.world, NPC_ROUTINE_INTERVAL_TICKS, &mut Vec::new());
+    npc_routine_system(
+        &mut state.world,
+        NPC_ROUTINE_INTERVAL_TICKS,
+        &mut Vec::new(),
+    );
 
     for e in entities {
         let r = state.world.get::<&NpcRoutine>(e).unwrap();
