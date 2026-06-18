@@ -3,6 +3,7 @@ use crate::components::{ItemDescription, ItemId, ItemName, ItemSlot, RoomContent
 use crate::game_state::{AdminDbOp, GameState};
 use crate::item::{EquipRequirements, EquipSlot, ItemData, ItemLocation};
 use crate::systems::output::{send_to_client, OutputRegistry};
+use crate::systems::queries::find_item_in_room;
 
 pub(crate) fn find_item_entity(world: &hecs::World, item_id: i64) -> Option<hecs::Entity> {
     let mut q = world.query::<(&ItemId,)>();
@@ -22,7 +23,7 @@ pub(crate) fn handle_admin_mitem(
         return;
     }
 
-    let Some(room_id) = super::get_player_room(state, entity) else {
+    let Some(room_id) = state.get_player_room(entity) else {
         return;
     };
 
@@ -85,19 +86,12 @@ pub(crate) fn handle_admin_destroy(
         return;
     }
 
-    let Some(room_id) = super::get_player_room(state, entity) else {
+    let Some(room_id) = state.get_player_room(entity) else {
         return;
     };
 
     let target_lower = target.trim().to_lowercase();
-    let found = {
-        let mut q = state.world.query::<(&ItemName, &RoomContents)>();
-        q.iter()
-            .find(|(_, (n, rc))| {
-                rc.room_id == room_id && n.0.to_lowercase().contains(&target_lower)
-            })
-            .map(|(e, (n, _))| (e, n.0.clone()))
-    };
+    let found = find_item_in_room(&state.world, room_id, &target_lower);
 
     let Some((item_ent, item_name)) = found else {
         send_to_client(

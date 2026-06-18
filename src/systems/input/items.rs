@@ -1,11 +1,9 @@
 use crate::command::ClientId;
-use crate::components::{
-    CharacterId, ClientConnection, Equipped, InInventory, ItemName, ItemSlot, Name, Position,
-    RoomContents, Stats, TwoHanded,
-};
+use crate::components::{CharacterId, Equipped, InInventory, ItemName, ItemSlot, Name, RoomContents, Stats, TwoHanded};
 use crate::game_state::GameState;
 use crate::item::{EquipRequirements, EquipSlot, ItemLocation, ItemLocationSave};
 use crate::systems::output::{send_to_client, OutputRegistry};
+use crate::systems::queries::{clients_in_room_except, find_item_in_inventory, find_item_in_room};
 
 pub(super) fn handle_get(
     state: &mut GameState,
@@ -22,11 +20,8 @@ pub(super) fn handle_get(
         return;
     }
 
-    let room_id = {
-        let Ok(pos) = state.world.get::<&Position>(entity) else {
-            return;
-        };
-        pos.room_id
+    let Some(room_id) = state.get_player_room(entity) else {
+        return;
     };
 
     let limit = super::effective_inventory_limit(&state.world, entity);
@@ -40,14 +35,7 @@ pub(super) fn handle_get(
     }
 
     let target_lower = target.to_lowercase();
-    let found = {
-        let mut q = state.world.query::<(&ItemName, &RoomContents)>();
-        q.iter()
-            .find(|(_, (n, rc))| {
-                rc.room_id == room_id && n.0.to_lowercase().contains(&target_lower)
-            })
-            .map(|(e, (n, _))| (e, n.0.clone()))
-    };
+    let found = find_item_in_room(&state.world, room_id, &target_lower);
 
     let Some((item, item_name)) = found else {
         send_to_client(
@@ -84,14 +72,7 @@ pub(super) fn handle_get(
         .get::<&Name>(entity)
         .map(|n| n.0.clone())
         .unwrap_or_default();
-    let others: Vec<ClientId> = {
-        let mut q = state.world.query::<(&Position, &ClientConnection)>();
-        q.iter()
-            .filter(|(e, (p, _))| *e != entity && p.room_id == room_id)
-            .map(|(_, (_, conn))| conn.client_id)
-            .collect()
-    };
-    for id in others {
+    for id in clients_in_room_except(&state.world, room_id, entity) {
         send_to_client(
             registry,
             id,
@@ -115,20 +96,12 @@ pub(super) fn handle_drop(
         return;
     }
 
-    let room_id = {
-        let Ok(pos) = state.world.get::<&Position>(entity) else {
-            return;
-        };
-        pos.room_id
+    let Some(room_id) = state.get_player_room(entity) else {
+        return;
     };
 
     let target_lower = target.to_lowercase();
-    let found = {
-        let mut q = state.world.query::<(&ItemName, &InInventory)>();
-        q.iter()
-            .find(|(_, (n, inv))| inv.owner == entity && n.0.to_lowercase().contains(&target_lower))
-            .map(|(e, (n, _))| (e, n.0.clone()))
-    };
+    let found = find_item_in_inventory(&state.world, entity, &target_lower);
 
     let Some((item, item_name)) = found else {
         send_to_client(
@@ -160,14 +133,7 @@ pub(super) fn handle_drop(
         .get::<&Name>(entity)
         .map(|n| n.0.clone())
         .unwrap_or_default();
-    let others: Vec<ClientId> = {
-        let mut q = state.world.query::<(&Position, &ClientConnection)>();
-        q.iter()
-            .filter(|(e, (p, _))| *e != entity && p.room_id == room_id)
-            .map(|(_, (_, conn))| conn.client_id)
-            .collect()
-    };
-    for id in others {
+    for id in clients_in_room_except(&state.world, room_id, entity) {
         send_to_client(
             registry,
             id,
@@ -242,12 +208,7 @@ pub(super) fn handle_equip(
     }
 
     let target_lower = target.to_lowercase();
-    let found = {
-        let mut q = state.world.query::<(&ItemName, &InInventory)>();
-        q.iter()
-            .find(|(_, (n, inv))| inv.owner == entity && n.0.to_lowercase().contains(&target_lower))
-            .map(|(e, (n, _))| (e, n.0.clone()))
-    };
+    let found = find_item_in_inventory(&state.world, entity, &target_lower);
 
     let Some((item, item_name)) = found else {
         send_to_client(

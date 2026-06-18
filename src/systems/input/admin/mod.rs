@@ -21,9 +21,7 @@ pub(super) use rooms::{
 };
 
 use crate::command::ClientId;
-use crate::components::{
-    AdminFlag, ClientConnection, ItemId, ItemName, Name, Position, RoomContents,
-};
+use crate::components::{ClientConnection, ItemId, ItemName, Name, RoomContents};
 use crate::game_state::GameState;
 use crate::systems::output::{send_to_client, OutputRegistry};
 
@@ -33,7 +31,7 @@ pub(super) fn require_admin(
     entity: hecs::Entity,
     registry: &OutputRegistry,
 ) -> bool {
-    if state.world.get::<&AdminFlag>(entity).is_err() {
+    if !state.is_admin(entity) {
         send_to_client(
             registry,
             client_id,
@@ -45,20 +43,11 @@ pub(super) fn require_admin(
     }
 }
 
-pub(super) fn get_player_room(state: &GameState, entity: hecs::Entity) -> Option<u64> {
-    state.world.get::<&Position>(entity).ok().map(|p| p.room_id)
-}
-
 pub(super) fn handle_admin_who(state: &GameState, client_id: ClientId, registry: &OutputRegistry) {
     let Some(entity) = state.player_registry.get_entity(client_id) else {
         return;
     };
-    if state.world.get::<&AdminFlag>(entity).is_err() {
-        send_to_client(
-            registry,
-            client_id,
-            "You don't have that power.".to_string(),
-        );
+    if !require_admin(state, client_id, entity, registry) {
         return;
     }
     let mut lines = vec!["<yellow>=== Online Players ===</yellow>".to_string()];
@@ -80,16 +69,11 @@ pub(super) fn handle_admin_roominfo(
     let Some(entity) = state.player_registry.get_entity(client_id) else {
         return;
     };
-    if state.world.get::<&AdminFlag>(entity).is_err() {
-        send_to_client(
-            registry,
-            client_id,
-            "You don't have that power.".to_string(),
-        );
+    if !require_admin(state, client_id, entity, registry) {
         return;
     }
 
-    let Some(room_id) = get_player_room(state, entity) else {
+    let Some(room_id) = state.get_player_room(entity) else {
         return;
     };
     let Some(room) = state.room_registry.get(room_id) else {

@@ -1,7 +1,9 @@
 use crate::command::ClientId;
-use crate::components::{InDialogue, Name, NpcGreeting, NpcId, Position};
+use crate::components::{InDialogue, NpcGreeting};
 use crate::game_state::GameState;
 use crate::systems::output::{send_to_client, OutputRegistry};
+use crate::systems::queries::find_npc_in_room;
+use crate::systems::quest::{quest_accept_from_npc, quest_mark_objective, quest_turn_in};
 
 pub(super) fn handle_talk(
     state: &mut GameState,
@@ -12,21 +14,12 @@ pub(super) fn handle_talk(
     let Some(entity) = state.player_registry.get_entity(client_id) else {
         return;
     };
-    let room_id = match state.world.get::<&Position>(entity).ok() {
-        Some(p) => p.room_id,
-        None => return,
+    let Some(room_id) = state.get_player_room(entity) else {
+        return;
     };
 
     let target_lower = target.trim().to_lowercase();
-    let found = {
-        let mut q = state.world.query::<(&Name, &Position, &NpcId)>();
-        q.iter()
-            .filter(|(_, (_, pos, _))| pos.room_id == room_id)
-            .find(|(_, (name, _, _))| name.0.to_lowercase().contains(&target_lower))
-            .map(|(e, (name, _, npc_id))| (e, name.0.clone(), npc_id.0))
-    };
-
-    let Some((npc_e, npc_name, npc_db_id)) = found else {
+    let Some((npc_e, npc_name, npc_db_id)) = find_npc_in_room(&state.world, room_id, &target_lower) else {
         send_to_client(
             registry,
             client_id,
@@ -64,13 +57,13 @@ pub(super) fn handle_talk(
     // ── Fallback: NPC has no dialogue tree — use legacy greeting behaviour ──
 
     // Quest: turn in any ready quests for this NPC first.
-    super::quest_turn_in(state, entity, npc_db_id, client_id, registry);
+    quest_turn_in(state, entity, npc_db_id, client_id, registry);
 
     // Quest: auto-accept new quests offered by this NPC.
-    super::quest_accept_from_npc(state, entity, npc_db_id, client_id, registry);
+    quest_accept_from_npc(state, entity, npc_db_id, client_id, registry);
 
     // Quest: mark any Talk objectives targeting this NPC as complete.
-    super::quest_mark_objective(
+    quest_mark_objective(
         state,
         entity,
         client_id,

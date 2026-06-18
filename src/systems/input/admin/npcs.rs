@@ -3,6 +3,7 @@ use crate::components::{
     Hostile, Name, NpcDescription, NpcGreeting, NpcId, NpcRoutine, Passive, PatrolRoute, Position,
 };
 use crate::game_state::{AdminDbOp, GameState};
+use crate::systems::queries::find_npc_in_room;
 use crate::npc::NpcData;
 use crate::systems::output::{send_to_client, OutputRegistry};
 
@@ -23,7 +24,7 @@ pub(crate) fn handle_admin_mnpc(
     if !super::require_admin(state, client_id, entity, registry) {
         return;
     }
-    let Some(room_id) = super::get_player_room(state, entity) else {
+    let Some(room_id) = state.get_player_room(entity) else {
         return;
     };
 
@@ -99,16 +100,11 @@ pub(crate) fn handle_admin_ndestroy(
             .find(|(_, (_, nid))| nid.0 == id)
             .map(|(e, (n, nid))| (e, n.0.clone(), nid.0))
     } else {
-        let Some(room_id) = super::get_player_room(state, entity) else {
+        let Some(room_id) = state.get_player_room(entity) else {
             return;
         };
         let target_lower = target.to_lowercase();
-        let mut q = state.world.query::<(&Name, &Position, &NpcId)>();
-        q.iter()
-            .find(|(_, (n, pos, _))| {
-                pos.room_id == room_id && n.0.to_lowercase().contains(&target_lower)
-            })
-            .map(|(e, (n, _, nid))| (e, n.0.clone(), nid.0))
+        find_npc_in_room(&state.world, room_id, &target_lower)
     };
 
     let Some((npc_ent, npc_name, npc_id)) = found else {
@@ -430,7 +426,7 @@ pub(crate) fn handle_admin_nlist(
         let mut q = state.world.query::<(&NpcId, &Name, &Position)>();
         q.iter()
             .map(|(e, (id, name, pos))| {
-                let hostile = state.world.get::<&Hostile>(e).is_ok();
+                let hostile = state.is_hostile(e);
                 let patrol = state.world.get::<&PatrolRoute>(e).is_ok();
                 (id.0, name.0.clone(), pos.room_id, hostile, patrol)
             })
@@ -493,7 +489,7 @@ pub(crate) fn handle_admin_ninfo(
         .ok()
         .map(|g| format!("\"{}\"", g.0))
         .unwrap_or_else(|| "(none)".to_string());
-    let hostile = state.world.get::<&Hostile>(npc_ent).is_ok();
+    let hostile = state.is_hostile(npc_ent);
     let passive = state.world.get::<&Passive>(npc_ent).is_ok();
     let room_id = state
         .world

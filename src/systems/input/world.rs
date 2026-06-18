@@ -1,9 +1,11 @@
 use crate::character::CharacterData;
 use crate::command::ClientId;
 use crate::components::{
-    AdminFlag, CharacterId, ClientConnection, Equipped, InInventory, ItemDescription, ItemId,
-    ItemName, Name, NpcDescription, NpcId, PlayerQuests, Position, RoomContents, Stats, Wallet,
+    CharacterId, ClientConnection, Equipped, InInventory, ItemDescription, ItemId, ItemName, Name,
+    NpcDescription, PlayerQuests, Position, Stats, Wallet,
 };
+use crate::systems::queries::{clients_in_room_except, find_item_in_inventory, find_item_in_room, find_npc_in_room};
+use crate::systems::quest::{quest_accept_from_item, quest_mark_objective};
 use crate::game_state::GameState;
 use crate::help::{find_entry, CATEGORIES, HELP_ENTRIES};
 use crate::item::{ItemLocation, ItemLocationSave};
@@ -34,14 +36,7 @@ pub(super) fn handle_connect(
     }
 
     if let Some(rid) = room_id {
-        let others: Vec<ClientId> = {
-            let mut q = state.world.query::<(&Position, &ClientConnection)>();
-            q.iter()
-                .filter(|(e, (p, _))| *e != entity && p.room_id == rid)
-                .map(|(_, (_, conn))| conn.client_id)
-                .collect()
-        };
-        for id in others {
+        for id in clients_in_room_except(&state.world, rid, entity) {
             send_to_client(
                 registry,
                 id,
@@ -55,11 +50,8 @@ pub(super) fn handle_look(state: &GameState, client_id: ClientId, registry: &Out
     let Some(entity) = state.player_registry.get_entity(client_id) else {
         return;
     };
-    let room_id = {
-        let Ok(pos) = state.world.get::<&Position>(entity) else {
-            return;
-        };
-        pos.room_id
+    let Some(room_id) = state.get_player_room(entity) else {
+        return;
     };
     if let Some(desc) = super::describe_room(state, room_id, entity) {
         send_to_client(registry, client_id, desc);
@@ -75,11 +67,8 @@ pub(super) fn handle_say(
     let Some(sender_entity) = state.player_registry.get_entity(client_id) else {
         return;
     };
-    let sender_room_id = {
-        let Ok(pos) = state.world.get::<&Position>(sender_entity) else {
-            return;
-        };
-        pos.room_id
+    let Some(sender_room_id) = state.get_player_room(sender_entity) else {
+        return;
     };
     let recipients: Vec<ClientId> = {
         let mut q = state.world.query::<(&Position, &ClientConnection)>();
@@ -113,42 +102,19 @@ pub(super) fn handle_examine(
         return;
     }
 
-    let room_id = state.world.get::<&Position>(entity).ok().map(|p| p.room_id);
+    let room_id = state.get_player_room(entity);
     let target_lower = target.to_lowercase();
 
     // Search floor → bag → equipped, in that priority order.
-    let item: Option<hecs::Entity> = {
-        let floor = room_id.and_then(|rid| {
-            let mut q = state.world.query::<(&ItemName, &RoomContents)>();
+    let item: Option<hecs::Entity> = room_id
+        .and_then(|rid| find_item_in_room(&state.world, rid, &target_lower).map(|(e, _)| e))
+        .or_else(|| find_item_in_inventory(&state.world, entity, &target_lower).map(|(e, _)| e))
+        .or_else(|| {
+            let mut q = state.world.query::<(&ItemName, &Equipped)>();
             q.iter()
-                .find(|(_, (n, rc))| {
-                    rc.room_id == rid && n.0.to_lowercase().contains(&target_lower)
-                })
+                .find(|(_, (n, eq))| eq.owner == entity && n.0.to_lowercase().contains(&target_lower))
                 .map(|(e, _)| e)
         });
-        if floor.is_some() {
-            floor
-        } else {
-            let inv = {
-                let mut q = state.world.query::<(&ItemName, &InInventory)>();
-                q.iter()
-                    .find(|(_, (n, inv))| {
-                        inv.owner == entity && n.0.to_lowercase().contains(&target_lower)
-                    })
-                    .map(|(e, _)| e)
-            };
-            if inv.is_some() {
-                inv
-            } else {
-                let mut q = state.world.query::<(&ItemName, &Equipped)>();
-                q.iter()
-                    .find(|(_, (n, eq))| {
-                        eq.owner == entity && n.0.to_lowercase().contains(&target_lower)
-                    })
-                    .map(|(e, _)| e)
-            }
-        }
-    };
 
     if let Some(item) = item {
         let name = state
@@ -169,8 +135,8 @@ pub(super) fn handle_examine(
 
         // Check for item-triggered quest start or Examine objective.
         if let Ok(item_id) = state.world.get::<&ItemId>(item).map(|id| id.0) {
-            super::quest_accept_from_item(state, entity, item_id, client_id, registry);
-            super::quest_mark_objective(
+            quest_accept_from_item(state, entity, item_id, client_id, registry);
+            quest_mark_objective(
                 state,
                 entity,
                 client_id,
@@ -184,15 +150,7 @@ pub(super) fn handle_examine(
 
     // Also check NPCs in the current room.
     if let Some(rid) = room_id {
-        let npc = {
-            let mut q = state.world.query::<(&Name, &Position, &NpcId)>();
-            q.iter()
-                .find(|(_, (n, pos, _))| {
-                    pos.room_id == rid && n.0.to_lowercase().contains(&target_lower)
-                })
-                .map(|(e, (n, _, _))| (e, n.0.clone()))
-        };
-        if let Some((npc_e, npc_name)) = npc {
+        if let Some((npc_e, npc_name, _)) = find_npc_in_room(&state.world, rid, &target_lower) {
             let desc = state
                 .world
                 .get::<&NpcDescription>(npc_e)
@@ -224,10 +182,9 @@ pub(super) fn handle_score(state: &GameState, client_id: ClientId, registry: &Ou
         .get::<&Name>(entity)
         .map(|n| n.0.clone())
         .unwrap_or_default();
-    let is_admin = state.world.get::<&AdminFlag>(entity).is_ok();
+    let is_admin = state.is_admin(entity);
     let room_name = {
-        let room_id = state.world.get::<&Position>(entity).ok().map(|p| p.room_id);
-        room_id
+        state.get_player_room(entity)
             .and_then(|id| state.room_registry.get(id))
             .map(|r| r.name.clone())
             .unwrap_or_else(|| "Unknown".to_string())
@@ -366,14 +323,7 @@ pub(super) fn handle_quit(state: &mut GameState, client_id: ClientId, registry: 
             .unwrap_or_default();
 
         if let Some(rid) = room_id {
-            let others: Vec<ClientId> = {
-                let mut q = state.world.query::<(&Position, &ClientConnection)>();
-                q.iter()
-                    .filter(|(e, (p, _))| *e != entity && p.room_id == rid)
-                    .map(|(_, (_, conn))| conn.client_id)
-                    .collect()
-            };
-            for id in others {
+            for id in clients_in_room_except(&state.world, rid, entity) {
                 send_to_client(registry, id, format!("{} has left the world.", player_name));
             }
         }
@@ -431,7 +381,7 @@ pub(super) fn handle_help(
     let is_admin = state
         .player_registry
         .get_entity(client_id)
-        .map(|e| state.world.get::<&AdminFlag>(e).is_ok())
+        .map(|e| state.is_admin(e))
         .unwrap_or(false);
 
     match topic {

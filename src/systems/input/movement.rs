@@ -6,6 +6,7 @@ use crate::systems::{
     combat::clear_combat,
     movement,
     output::{send_to_client, OutputRegistry},
+    quest::quest_mark_objective,
 };
 
 pub(super) fn handle_move(
@@ -79,7 +80,7 @@ pub(super) fn handle_move(
             }
 
             // Check Reach objectives for the new room.
-            super::quest_mark_objective(
+            quest_mark_objective(
                 state,
                 entity,
                 client_id,

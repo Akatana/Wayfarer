@@ -54,7 +54,7 @@ pub(crate) fn handle_admin_dig(
         return;
     }
 
-    let Some(current_room_id) = super::get_player_room(state, entity) else {
+    let Some(current_room_id) = state.get_player_room(entity) else {
         return;
     };
 
@@ -129,7 +129,7 @@ pub(crate) fn handle_admin_link(
         return;
     }
 
-    let Some(current_room_id) = super::get_player_room(state, entity) else {
+    let Some(current_room_id) = state.get_player_room(entity) else {
         return;
     };
 
@@ -188,7 +188,7 @@ pub(crate) fn handle_admin_unlink(
         return;
     }
 
-    let Some(current_room_id) = super::get_player_room(state, entity) else {
+    let Some(current_room_id) = state.get_player_room(entity) else {
         return;
     };
 
@@ -233,7 +233,7 @@ pub(crate) fn handle_admin_rename(
         return;
     }
 
-    let Some(room_id) = super::get_player_room(state, entity) else {
+    let Some(room_id) = state.get_player_room(entity) else {
         return;
     };
 
@@ -271,7 +271,7 @@ pub(crate) fn handle_admin_redesc(
         return;
     }
 
-    let Some(room_id) = super::get_player_room(state, entity) else {
+    let Some(room_id) = state.get_player_room(entity) else {
         return;
     };
 

@@ -3,8 +3,9 @@ use std::collections::{HashMap, VecDeque};
 use crate::character::CharacterData;
 use crate::command::{ClientId, Command};
 use crate::components::{
-    AdminFlag, BagCapacity, CharacterId, ClientConnection, Equipped, InInventory, ItemDescription,
-    ItemId, ItemName, ItemSlot, Name, PlayerQuests, Position, Stats, TwoHanded, Wallet,
+    AdminFlag, BagCapacity, CharacterId, ClientConnection, Equipped, Hostile, InInventory,
+    ItemDescription, ItemId, ItemName, ItemSlot, Name, PlayerQuests, Position, Stats, TwoHanded,
+    Wallet,
 };
 use crate::dialogue::NpcDialogue;
 use crate::direction::Direction;
@@ -147,6 +148,18 @@ impl GameState {
             pending_commands: HashMap::new(),
             pending_respawns: Vec::new(),
         }
+    }
+
+    pub fn is_admin(&self, entity: hecs::Entity) -> bool {
+        self.world.get::<&AdminFlag>(entity).is_ok()
+    }
+
+    pub fn get_player_room(&self, entity: hecs::Entity) -> Option<u64> {
+        self.world.get::<&Position>(entity).ok().map(|p| p.room_id)
+    }
+
+    pub fn is_hostile(&self, entity: hecs::Entity) -> bool {
+        self.world.get::<&Hostile>(entity).is_ok()
     }
 
     /// Advances the engine clock by one tick.
