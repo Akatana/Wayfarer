@@ -1,5 +1,41 @@
 // ── Runtime item types ────────────────────────────────────────────────────────
 
+/// Passive bonuses granted to the wearer while the item is equipped.
+/// Used as both a data field on `ItemData`/`ItemDef` and as an ECS component
+/// on item entities (added only when `has_any()` is true).
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Deserialize)]
+pub struct ItemBonuses {
+    #[serde(default)]
+    pub bonus_strength: i32,
+    #[serde(default)]
+    pub bonus_dexterity: i32,
+    #[serde(default)]
+    pub bonus_knowledge: i32,
+    #[serde(default)]
+    pub bonus_max_hp: i32,
+    /// Minimum damage added when this item is wielded as a weapon.
+    #[serde(default)]
+    pub bonus_min_damage: i32,
+    /// Maximum damage added when this item is wielded as a weapon.
+    #[serde(default)]
+    pub bonus_max_damage: i32,
+    /// Flat damage reduction applied to each incoming hit while equipped.
+    #[serde(default)]
+    pub bonus_armor: i32,
+}
+
+impl ItemBonuses {
+    pub fn has_any(&self) -> bool {
+        self.bonus_strength != 0
+            || self.bonus_dexterity != 0
+            || self.bonus_knowledge != 0
+            || self.bonus_max_hp != 0
+            || self.bonus_min_damage != 0
+            || self.bonus_max_damage != 0
+            || self.bonus_armor != 0
+    }
+}
+
 /// Stat requirements that must be met before an item can be equipped.
 #[derive(Debug, Clone, Copy, Default, PartialEq, serde::Deserialize)]
 pub struct EquipRequirements {
@@ -74,6 +110,7 @@ pub struct ItemData {
     pub two_handed: bool,
     pub bag_capacity: Option<usize>,
     pub requirements: EquipRequirements,
+    pub bonuses: ItemBonuses,
     pub location: ItemLocation,
 }
 

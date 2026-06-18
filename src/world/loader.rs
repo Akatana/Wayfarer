@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::direction::Direction;
-use crate::item::EquipRequirements;
+use crate::item::{EquipRequirements, ItemBonuses};
 use crate::npc::NpcData;
 use crate::world::room::{Exit, Room, RoomRegistry};
 
@@ -37,6 +37,8 @@ pub struct ItemDef {
     pub bag_capacity: Option<usize>,
     #[serde(default)]
     pub requirements: EquipRequirements,
+    #[serde(default)]
+    pub bonuses: ItemBonuses,
 }
 
 /// Output of `load_seed` — everything needed to bootstrap the world on first boot.

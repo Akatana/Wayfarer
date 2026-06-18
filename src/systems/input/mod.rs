@@ -147,6 +147,9 @@ fn dispatch(state: &mut GameState, input: PlayerInput, registry: &OutputRegistry
         }
         Command::AdminIspawn(def_id) => admin::handle_admin_ispawn(state, id, def_id, registry),
         Command::AdminIdefs => admin::handle_admin_idefs(state, id, registry),
+        Command::AdminIbonus(def_id, field, val) => {
+            admin::handle_admin_ibonus(state, id, def_id, field, val, registry)
+        }
         Command::AdminMnpc(spec) => admin::handle_admin_mnpc(state, id, spec, registry),
         Command::AdminNdestroy(target) => {
             admin::handle_admin_ndestroy(state, id, &target, registry)

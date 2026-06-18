@@ -58,6 +58,10 @@ pub enum AdminDbOp {
         dexterity: i32,
         knowledge: i32,
     },
+    UpdateDefBonuses {
+        id: i64,
+        bonuses: crate::item::ItemBonuses,
+    },
     CreateNpc(NpcData),
     DeleteNpc(i64),
     UpdateNpcName {
@@ -248,6 +252,9 @@ impl GameState {
             }
             if item.requirements.has_any() {
                 builder.add(item.requirements);
+            }
+            if item.bonuses.has_any() {
+                builder.add(item.bonuses);
             }
 
             self.world.spawn(builder.build());

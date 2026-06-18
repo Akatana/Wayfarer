@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement};
 
-use crate::item::{EquipRequirements, EquipSlot, ItemData, ItemLocation, ItemLocationSave};
+use crate::item::{
+    EquipRequirements, EquipSlot, ItemBonuses, ItemData, ItemLocation, ItemLocationSave,
+};
 use crate::world::loader::ItemDef;
 
 // ── Item definition seeding / loading ────────────────────────────────────────
@@ -30,8 +32,10 @@ pub async fn seed_defs_if_empty(
             DbBackend::Sqlite,
             "INSERT INTO item_definitions (
                 id, name, description, equip_slot, two_handed, bag_capacity,
-                req_level, req_strength, req_dexterity, req_knowledge
-             ) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                req_level, req_strength, req_dexterity, req_knowledge,
+                bonus_strength, bonus_dexterity, bonus_knowledge, bonus_max_hp,
+                bonus_min_damage, bonus_max_damage, bonus_armor
+             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [
                 def.id.into(),
                 def.name.clone().into(),
@@ -43,6 +47,13 @@ pub async fn seed_defs_if_empty(
                 (def.requirements.strength as i64).into(),
                 (def.requirements.dexterity as i64).into(),
                 (def.requirements.knowledge as i64).into(),
+                (def.bonuses.bonus_strength as i64).into(),
+                (def.bonuses.bonus_dexterity as i64).into(),
+                (def.bonuses.bonus_knowledge as i64).into(),
+                (def.bonuses.bonus_max_hp as i64).into(),
+                (def.bonuses.bonus_min_damage as i64).into(),
+                (def.bonuses.bonus_max_damage as i64).into(),
+                (def.bonuses.bonus_armor as i64).into(),
             ],
         ))
         .await?;
@@ -69,8 +80,10 @@ pub async fn create_def(db: &DatabaseConnection, def: &ItemDef) -> Result<(), Db
         DbBackend::Sqlite,
         "INSERT INTO item_definitions (
             id, name, description, equip_slot, two_handed, bag_capacity,
-            req_level, req_strength, req_dexterity, req_knowledge
-         ) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            req_level, req_strength, req_dexterity, req_knowledge,
+            bonus_strength, bonus_dexterity, bonus_knowledge, bonus_max_hp,
+            bonus_min_damage, bonus_max_damage, bonus_armor
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             def.id.into(),
             def.name.clone().into(),
@@ -82,6 +95,13 @@ pub async fn create_def(db: &DatabaseConnection, def: &ItemDef) -> Result<(), Db
             (def.requirements.strength as i64).into(),
             (def.requirements.dexterity as i64).into(),
             (def.requirements.knowledge as i64).into(),
+            (def.bonuses.bonus_strength as i64).into(),
+            (def.bonuses.bonus_dexterity as i64).into(),
+            (def.bonuses.bonus_knowledge as i64).into(),
+            (def.bonuses.bonus_max_hp as i64).into(),
+            (def.bonuses.bonus_min_damage as i64).into(),
+            (def.bonuses.bonus_max_damage as i64).into(),
+            (def.bonuses.bonus_armor as i64).into(),
         ],
     ))
     .await?;
@@ -140,8 +160,10 @@ pub async fn seed_if_empty(
                 "INSERT INTO items (
                     def_id, name, description, equip_slot, two_handed, bag_capacity,
                     req_level, req_strength, req_dexterity, req_knowledge,
+                    bonus_strength, bonus_dexterity, bonus_knowledge, bonus_max_hp,
+                    bonus_min_damage, bonus_max_damage, bonus_armor,
                     location, room_id
-                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 [
                     def_id.into(),
                     def.name.clone().into(),
@@ -153,6 +175,13 @@ pub async fn seed_if_empty(
                     (def.requirements.strength as i64).into(),
                     (def.requirements.dexterity as i64).into(),
                     (def.requirements.knowledge as i64).into(),
+                    (def.bonuses.bonus_strength as i64).into(),
+                    (def.bonuses.bonus_dexterity as i64).into(),
+                    (def.bonuses.bonus_knowledge as i64).into(),
+                    (def.bonuses.bonus_max_hp as i64).into(),
+                    (def.bonuses.bonus_min_damage as i64).into(),
+                    (def.bonuses.bonus_max_damage as i64).into(),
+                    (def.bonuses.bonus_armor as i64).into(),
                     "room".into(),
                     (room_id as i64).into(),
                 ],
@@ -207,8 +236,10 @@ pub async fn create(db: &DatabaseConnection, item: &ItemData) -> Result<(), DbEr
         "INSERT OR IGNORE INTO items (
             id, def_id, name, description, equip_slot, two_handed, bag_capacity,
             req_level, req_strength, req_dexterity, req_knowledge,
+            bonus_strength, bonus_dexterity, bonus_knowledge, bonus_max_hp,
+            bonus_min_damage, bonus_max_damage, bonus_armor,
             location, room_id
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             item.id.into(),
             item.def_id.into(),
@@ -221,6 +252,13 @@ pub async fn create(db: &DatabaseConnection, item: &ItemData) -> Result<(), DbEr
             (item.requirements.strength as i64).into(),
             (item.requirements.dexterity as i64).into(),
             (item.requirements.knowledge as i64).into(),
+            (item.bonuses.bonus_strength as i64).into(),
+            (item.bonuses.bonus_dexterity as i64).into(),
+            (item.bonuses.bonus_knowledge as i64).into(),
+            (item.bonuses.bonus_max_hp as i64).into(),
+            (item.bonuses.bonus_min_damage as i64).into(),
+            (item.bonuses.bonus_max_damage as i64).into(),
+            (item.bonuses.bonus_armor as i64).into(),
             item.location.as_db_str().into(),
             room_id.into(),
         ],
@@ -364,6 +402,13 @@ fn row_to_item_data(r: &sea_orm::QueryResult) -> Result<ItemData, DbErr> {
     let req_strength: i64 = r.try_get("", "req_strength")?;
     let req_dexterity: i64 = r.try_get("", "req_dexterity")?;
     let req_knowledge: i64 = r.try_get("", "req_knowledge")?;
+    let bonus_strength: i64 = r.try_get("", "bonus_strength").unwrap_or(0);
+    let bonus_dexterity: i64 = r.try_get("", "bonus_dexterity").unwrap_or(0);
+    let bonus_knowledge: i64 = r.try_get("", "bonus_knowledge").unwrap_or(0);
+    let bonus_max_hp: i64 = r.try_get("", "bonus_max_hp").unwrap_or(0);
+    let bonus_min_damage: i64 = r.try_get("", "bonus_min_damage").unwrap_or(0);
+    let bonus_max_damage: i64 = r.try_get("", "bonus_max_damage").unwrap_or(0);
+    let bonus_armor: i64 = r.try_get("", "bonus_armor").unwrap_or(0);
     let location_str: String = r.try_get("", "location")?;
     let room_id: Option<i64> = r.try_get("", "room_id")?;
     let char_id: Option<i64> = r.try_get("", "char_id")?;
@@ -398,6 +443,15 @@ fn row_to_item_data(r: &sea_orm::QueryResult) -> Result<ItemData, DbErr> {
             strength: req_strength as i32,
             dexterity: req_dexterity as i32,
             knowledge: req_knowledge as i32,
+        },
+        bonuses: ItemBonuses {
+            bonus_strength: bonus_strength as i32,
+            bonus_dexterity: bonus_dexterity as i32,
+            bonus_knowledge: bonus_knowledge as i32,
+            bonus_max_hp: bonus_max_hp as i32,
+            bonus_min_damage: bonus_min_damage as i32,
+            bonus_max_damage: bonus_max_damage as i32,
+            bonus_armor: bonus_armor as i32,
         },
         location,
     })
@@ -464,6 +518,32 @@ pub async fn update_def_requirements(
     Ok(())
 }
 
+pub async fn update_def_bonuses(
+    db: &DatabaseConnection,
+    id: i64,
+    bonuses: &ItemBonuses,
+) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "UPDATE item_definitions SET
+            bonus_strength=?, bonus_dexterity=?, bonus_knowledge=?, bonus_max_hp=?,
+            bonus_min_damage=?, bonus_max_damage=?, bonus_armor=?
+         WHERE id=?",
+        [
+            (bonuses.bonus_strength as i64).into(),
+            (bonuses.bonus_dexterity as i64).into(),
+            (bonuses.bonus_knowledge as i64).into(),
+            (bonuses.bonus_max_hp as i64).into(),
+            (bonuses.bonus_min_damage as i64).into(),
+            (bonuses.bonus_max_damage as i64).into(),
+            (bonuses.bonus_armor as i64).into(),
+            id.into(),
+        ],
+    ))
+    .await?;
+    Ok(())
+}
+
 fn row_to_item_def(r: &sea_orm::QueryResult) -> Result<ItemDef, DbErr> {
     let id: i64 = r.try_get("", "id")?;
     let name: String = r.try_get("", "name")?;
@@ -475,6 +555,13 @@ fn row_to_item_def(r: &sea_orm::QueryResult) -> Result<ItemDef, DbErr> {
     let req_strength: i64 = r.try_get("", "req_strength")?;
     let req_dexterity: i64 = r.try_get("", "req_dexterity")?;
     let req_knowledge: i64 = r.try_get("", "req_knowledge")?;
+    let bonus_strength: i64 = r.try_get("", "bonus_strength").unwrap_or(0);
+    let bonus_dexterity: i64 = r.try_get("", "bonus_dexterity").unwrap_or(0);
+    let bonus_knowledge: i64 = r.try_get("", "bonus_knowledge").unwrap_or(0);
+    let bonus_max_hp: i64 = r.try_get("", "bonus_max_hp").unwrap_or(0);
+    let bonus_min_damage: i64 = r.try_get("", "bonus_min_damage").unwrap_or(0);
+    let bonus_max_damage: i64 = r.try_get("", "bonus_max_damage").unwrap_or(0);
+    let bonus_armor: i64 = r.try_get("", "bonus_armor").unwrap_or(0);
 
     Ok(ItemDef {
         id,
@@ -488,6 +575,15 @@ fn row_to_item_def(r: &sea_orm::QueryResult) -> Result<ItemDef, DbErr> {
             strength: req_strength as i32,
             dexterity: req_dexterity as i32,
             knowledge: req_knowledge as i32,
+        },
+        bonuses: ItemBonuses {
+            bonus_strength: bonus_strength as i32,
+            bonus_dexterity: bonus_dexterity as i32,
+            bonus_knowledge: bonus_knowledge as i32,
+            bonus_max_hp: bonus_max_hp as i32,
+            bonus_min_damage: bonus_min_damage as i32,
+            bonus_max_damage: bonus_max_damage as i32,
+            bonus_armor: bonus_armor as i32,
         },
     })
 }

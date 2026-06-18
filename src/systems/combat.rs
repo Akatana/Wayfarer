@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 
 use crate::components::{
-    BagCapacity, ClientConnection, Hostile, InCombat, ItemDescription, ItemId, ItemName, ItemSlot,
-    Name, NpcCombatStats, NpcId, NpcLootTable, Passive, Position, RoomContents, Stats, TwoHanded,
+    BagCapacity, ClientConnection, Equipped, Hostile, InCombat, ItemDescription, ItemId, ItemName,
+    ItemSlot, Name, NpcCombatStats, NpcId, NpcLootTable, Passive, Position, RoomContents, Stats,
+    TwoHanded,
 };
 use crate::game_state::{AdminDbOp, GameState};
+use crate::item::{EquipSlot, ItemBonuses};
 use crate::item::{ItemData, ItemLocation};
 use crate::npc::NpcRespawn;
 use crate::systems::output::{send_to_client, OutputRegistry};
@@ -49,6 +51,32 @@ fn roll(seed: u64, min: i32, max: i32) -> i32 {
 pub fn combat_system(state: &mut GameState, registry: &OutputRegistry) {
     let tick = state.current_tick;
 
+    // ── Pre-pass: collect gear bonuses for combat calculations ───────────────
+    // weapon_damage: player entity → (min_dmg, max_dmg) from equipped LeftHand item
+    let weapon_damage: std::collections::HashMap<hecs::Entity, (i32, i32)> = {
+        let mut map = std::collections::HashMap::new();
+        let mut q = state.world.query::<(&Equipped, &ItemBonuses)>();
+        for (_, (eq, b)) in q.iter() {
+            if eq.slot == EquipSlot::LeftHand {
+                map.insert(eq.owner, (b.bonus_min_damage, b.bonus_max_damage));
+            }
+        }
+        map
+    };
+
+    // player_armor: player entity → total flat damage reduction from all equipped items
+    let player_armor: std::collections::HashMap<hecs::Entity, i32> = {
+        let mut map: std::collections::HashMap<hecs::Entity, i32> =
+            std::collections::HashMap::new();
+        let mut q = state.world.query::<(&Equipped, &ItemBonuses)>();
+        for (_, (eq, b)) in q.iter() {
+            if b.bonus_armor > 0 {
+                *map.entry(eq.owner).or_insert(0) += b.bonus_armor;
+            }
+        }
+        map
+    };
+
     // ── Pass 1: collect attack events ────────────────────────────────────────
     // (attacker, target, damage, is_player_attacker)
     struct AttackEvent {
@@ -73,16 +101,26 @@ pub fn combat_system(state: &mut GameState, registry: &OutputRegistry) {
             }
             let (damage, is_player) = match (stats, npc_stats) {
                 (Some(s), _) => {
+                    // Use weapon damage range if a weapon with bonuses is equipped,
+                    // otherwise fall back to barehanded (1-5).
+                    let (wmin, wmax) = weapon_damage
+                        .get(&attacker)
+                        .copied()
+                        .map(|(mn, mx)| (mn.max(1), mx.max(1)))
+                        .unwrap_or((1, 5));
                     let base = (s.strength / 2).max(1);
-                    let rnd = roll(tick ^ u64::from(attacker.to_bits()), 1, 6);
+                    let rnd = roll(tick ^ u64::from(attacker.to_bits()), wmin, wmax + 1);
                     (base + rnd, true)
                 }
                 (_, Some(ns)) => {
-                    let d = roll(
+                    let raw = roll(
                         tick ^ u64::from(attacker.to_bits()),
                         ns.min_damage,
                         ns.max_damage + 1,
                     );
+                    // Apply target player's armor rating.
+                    let armor = player_armor.get(&combat.target).copied().unwrap_or(0);
+                    let d = (raw - armor).max(1);
                     (d, false)
                 }
                 _ => continue,
@@ -309,6 +347,7 @@ pub fn combat_system(state: &mut GameState, registry: &OutputRegistry) {
                         two_handed: tmpl.two_handed,
                         bag_capacity: tmpl.bag_capacity,
                         requirements: tmpl.requirements,
+                        bonuses: tmpl.bonuses,
                         location: ItemLocation::Room(rid),
                     };
                     let mut builder = hecs::EntityBuilder::new();
@@ -327,6 +366,9 @@ pub fn combat_system(state: &mut GameState, registry: &OutputRegistry) {
                     }
                     if tmpl.requirements.has_any() {
                         builder.add(tmpl.requirements);
+                    }
+                    if tmpl.bonuses.has_any() {
+                        builder.add(tmpl.bonuses);
                     }
                     state.world.spawn(builder.build());
                     state

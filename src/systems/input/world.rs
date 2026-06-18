@@ -6,6 +6,7 @@ use crate::components::{
 };
 use crate::game_state::GameState;
 use crate::help::{find_entry, CATEGORIES, HELP_ENTRIES};
+use crate::item::{EquipSlot, ItemBonuses};
 use crate::item::{ItemLocation, ItemLocationSave};
 use crate::quest::QuestStatus;
 use crate::systems::combat::clear_combat;
@@ -202,6 +203,34 @@ pub(super) fn handle_score(state: &GameState, client_id: ClientId, registry: &Ou
     };
     let mut lines = vec![format!("<yellow>=== {} ===</yellow>{}", name, admin_tag)];
 
+    // Collect gear bonuses for display.
+    let gear: ItemBonuses = {
+        let mut total = ItemBonuses::default();
+        let mut q = state.world.query::<(&Equipped, &ItemBonuses)>();
+        for (_, (eq, b)) in q.iter() {
+            if eq.owner == entity {
+                total.bonus_strength += b.bonus_strength;
+                total.bonus_dexterity += b.bonus_dexterity;
+                total.bonus_knowledge += b.bonus_knowledge;
+                total.bonus_max_hp += b.bonus_max_hp;
+                total.bonus_armor += b.bonus_armor;
+            }
+        }
+        total
+    };
+
+    // Weapon damage range from equipped LeftHand item.
+    let weapon_dmg: Option<(i32, i32)> = {
+        let mut q = state.world.query::<(&Equipped, &ItemBonuses)>();
+        q.iter()
+            .find(|(_, (eq, b))| {
+                eq.owner == entity
+                    && eq.slot == EquipSlot::LeftHand
+                    && (b.bonus_min_damage > 0 || b.bonus_max_damage > 0)
+            })
+            .map(|(_, (_, b))| (b.bonus_min_damage, b.bonus_max_damage))
+    };
+
     if let Ok(s) = state.world.get::<&Stats>(entity) {
         lines.push(format!(
             "Level {}  |  XP: {}/{}  |  LP: {}",
@@ -210,14 +239,40 @@ pub(super) fn handle_score(state: &GameState, client_id: ClientId, registry: &Ou
             s.xp_to_next_level(),
             s.learning_points
         ));
+        let hp_bonus_str = if gear.bonus_max_hp > 0 {
+            format!(" (+{} gear)", gear.bonus_max_hp)
+        } else {
+            String::new()
+        };
         lines.push(format!(
-            "HP:  {}/{}   MP:  {}/{}",
-            s.hp, s.max_hp, s.mp, s.max_mp
+            "HP:  {}/{}{}   MP:  {}/{}",
+            s.hp, s.max_hp, hp_bonus_str, s.mp, s.max_mp
         ));
+        let str_str = if gear.bonus_strength != 0 {
+            format!("{} (+{})", s.strength, gear.bonus_strength)
+        } else {
+            s.strength.to_string()
+        };
+        let dex_str = if gear.bonus_dexterity != 0 {
+            format!("{} (+{})", s.dexterity, gear.bonus_dexterity)
+        } else {
+            s.dexterity.to_string()
+        };
+        let knw_str = if gear.bonus_knowledge != 0 {
+            format!("{} (+{})", s.knowledge, gear.bonus_knowledge)
+        } else {
+            s.knowledge.to_string()
+        };
         lines.push(format!(
             "STR: {}   DEX: {}   KNW: {}",
-            s.strength, s.dexterity, s.knowledge
+            str_str, dex_str, knw_str
         ));
+        if gear.bonus_armor > 0 {
+            lines.push(format!("Armor: {}", gear.bonus_armor));
+        }
+        if let Some((wmin, wmax)) = weapon_dmg {
+            lines.push(format!("Weapon: {} - {} damage", wmin, wmax));
+        }
     }
     if let Ok(w) = state.world.get::<&Wallet>(entity) {
         lines.push(format!("Wallet: {}", crate::currency::format_copper(w.0)));

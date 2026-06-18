@@ -4,8 +4,9 @@ mod quests;
 mod rooms;
 
 pub(super) use items::{
-    handle_admin_destroy, handle_admin_idefs, handle_admin_idesc, handle_admin_iname,
-    handle_admin_ireq, handle_admin_islot, handle_admin_ispawn, handle_admin_mitem,
+    handle_admin_destroy, handle_admin_ibonus, handle_admin_idefs, handle_admin_idesc,
+    handle_admin_iname, handle_admin_ireq, handle_admin_islot, handle_admin_ispawn,
+    handle_admin_mitem,
 };
 pub(super) use npcs::{
     handle_admin_mnpc, handle_admin_ndesc, handle_admin_ndestroy, handle_admin_ngreet,

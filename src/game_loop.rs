@@ -209,6 +209,9 @@ pub async fn run(
                         )
                         .await
                     }
+                    AdminDbOp::UpdateDefBonuses { id, bonuses } => {
+                        crate::db::item::update_def_bonuses(&db, id, &bonuses).await
+                    }
                     AdminDbOp::CreateNpc(npc) => crate::db::npc::create(&db, &npc).await,
                     AdminDbOp::DeleteNpc(id) => crate::db::npc::delete(&db, id).await,
                     AdminDbOp::UpdateNpcName { id, name } => {

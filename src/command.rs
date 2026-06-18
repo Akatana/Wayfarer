@@ -79,6 +79,8 @@ pub enum Command {
     AdminIspawn(i64),
     /// List all loaded item definitions (admin only).
     AdminIdefs,
+    /// Set one bonus field on an item definition: field ∈ {str, dex, knw, hp, mindmg, maxdmg, armor} (admin only).
+    AdminIbonus(i64, String, i32),
     /// Initiate combat with a named NPC in the current room.
     Attack(String),
     /// Break off combat and flee to a random exit.

@@ -48,6 +48,9 @@ pub fn spawn_items(world: &mut hecs::World, items: &[ItemData]) {
         if item.requirements.has_any() {
             builder.add(item.requirements);
         }
+        if item.bonuses.has_any() {
+            builder.add(item.bonuses);
+        }
 
         world.spawn(builder.build());
     }
@@ -128,6 +131,7 @@ mod tests {
             two_handed: false,
             bag_capacity: None,
             requirements: EquipRequirements::default(),
+            bonuses: crate::item::ItemBonuses::default(),
             location: ItemLocation::Room(room_id),
         }
     }
@@ -213,6 +217,7 @@ mod tests {
             two_handed: false,
             bag_capacity: None,
             requirements: EquipRequirements::default(),
+            bonuses: crate::item::ItemBonuses::default(),
             location: ItemLocation::Inventory { char_id: 1 },
         };
         let mut world = hecs::World::new();

@@ -3,7 +3,7 @@ use crate::components::{
     BagCapacity, ItemDescription, ItemId, ItemName, ItemSlot, RoomContents, TwoHanded,
 };
 use crate::game_state::{AdminDbOp, GameState};
-use crate::item::{EquipRequirements, EquipSlot, ItemData, ItemLocation};
+use crate::item::{EquipRequirements, EquipSlot, ItemBonuses, ItemData, ItemLocation};
 use crate::systems::output::{send_to_client, OutputRegistry};
 use crate::systems::queries::find_item_in_room;
 use crate::world::loader::ItemDef;
@@ -51,6 +51,7 @@ pub(crate) fn handle_admin_mitem(
         two_handed: false,
         bag_capacity: None,
         requirements: EquipRequirements::default(),
+        bonuses: ItemBonuses::default(),
     };
     state.item_templates.insert(def_id, def.clone());
     state.pending_admin_ops.push(AdminDbOp::CreateItemDef(def));
@@ -68,6 +69,7 @@ pub(crate) fn handle_admin_mitem(
         two_handed: false,
         bag_capacity: None,
         requirements: EquipRequirements::default(),
+        bonuses: ItemBonuses::default(),
         location: ItemLocation::Room(room_id),
     };
 
@@ -371,6 +373,7 @@ pub(crate) fn handle_admin_ispawn(
         two_handed: def.two_handed,
         bag_capacity: def.bag_capacity,
         requirements: def.requirements,
+        bonuses: def.bonuses,
         location: ItemLocation::Room(room_id),
     };
 
@@ -391,6 +394,9 @@ pub(crate) fn handle_admin_ispawn(
     if def.requirements.has_any() {
         builder.add(def.requirements);
     }
+    if def.bonuses.has_any() {
+        builder.add(def.bonuses);
+    }
     state.world.spawn(builder.build());
 
     state
@@ -403,6 +409,70 @@ pub(crate) fn handle_admin_ispawn(
         format!(
             "<dim>[Admin] Spawned '{}' (def #{def_id}) as instance #{instance_id} in this room.</dim>",
             def.name
+        ),
+    );
+}
+
+pub(crate) fn handle_admin_ibonus(
+    state: &mut GameState,
+    client_id: ClientId,
+    def_id: i64,
+    field: String,
+    value: i32,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !super::require_admin(state, client_id, entity, registry) {
+        return;
+    }
+
+    let Some(def) = state.item_templates.get_mut(&def_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No item definition #{def_id}. Use @idefs to list all definitions."),
+        );
+        return;
+    };
+
+    match field.to_lowercase().as_str() {
+        "str" | "strength" => def.bonuses.bonus_strength = value,
+        "dex" | "dexterity" => def.bonuses.bonus_dexterity = value,
+        "knw" | "knowledge" => def.bonuses.bonus_knowledge = value,
+        "hp" | "maxhp" => def.bonuses.bonus_max_hp = value,
+        "mindmg" | "mindamage" => def.bonuses.bonus_min_damage = value,
+        "maxdmg" | "maxdamage" => def.bonuses.bonus_max_damage = value,
+        "armor" | "armour" | "ac" => def.bonuses.bonus_armor = value,
+        _ => {
+            send_to_client(
+                registry,
+                client_id,
+                "Unknown field. Use: str, dex, knw, hp, mindmg, maxdmg, armor".to_string(),
+            );
+            return;
+        }
+    }
+
+    let bonuses = def.bonuses;
+    state.pending_admin_ops.push(AdminDbOp::UpdateDefBonuses {
+        id: def_id,
+        bonuses,
+    });
+
+    send_to_client(
+        registry,
+        client_id,
+        format!(
+            "<dim>[Admin] Definition #{def_id} bonuses: STR+{} DEX+{} KNW+{} HP+{} DMG {}-{} ARM {}.</dim>",
+            bonuses.bonus_strength,
+            bonuses.bonus_dexterity,
+            bonuses.bonus_knowledge,
+            bonuses.bonus_max_hp,
+            bonuses.bonus_min_damage,
+            bonuses.bonus_max_damage,
+            bonuses.bonus_armor,
         ),
     );
 }

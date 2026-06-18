@@ -134,7 +134,7 @@ pub fn parse(input: &str) -> Command {
             .map(Command::AdminIspawn)
             .unwrap_or(Command::Unknown(input.to_string())),
         "@idefs" => Command::AdminIdefs,
-        "@iname" | "@idesc" | "@islot" | "@ireq" => {
+        "@iname" | "@idesc" | "@islot" | "@ireq" | "@ibonus" => {
             // All item-edit commands share the format: @cmd <id> <payload>
             let (id_str, payload) = rest.split_once(' ').unwrap_or((rest, ""));
             match id_str.parse::<i64>() {
@@ -146,6 +146,13 @@ pub fn parse(input: &str) -> Command {
                         let (stat, val_str) = payload.split_once(' ').unwrap_or((payload, ""));
                         match val_str.trim().parse::<i32>() {
                             Ok(val) => Command::AdminIreq(id, stat.to_string(), val),
+                            Err(_) => Command::Unknown(input.to_string()),
+                        }
+                    }
+                    "ibonus" => {
+                        let (field, val_str) = payload.split_once(' ').unwrap_or((payload, ""));
+                        match val_str.trim().parse::<i32>() {
+                            Ok(val) => Command::AdminIbonus(id, field.to_string(), val),
                             Err(_) => Command::Unknown(input.to_string()),
                         }
                     }
