@@ -5,8 +5,10 @@ use crate::components::{
     ItemName, Name, NpcDescription, NpcId, PlayerQuests, Position, RoomContents, Stats, Wallet,
 };
 use crate::game_state::GameState;
+use crate::help::{find_entry, CATEGORIES, HELP_ENTRIES};
 use crate::item::{ItemLocation, ItemLocationSave};
 use crate::quest::QuestStatus;
+use crate::systems::combat::clear_combat;
 use crate::systems::output::{send_to_client, OutputRegistry};
 
 pub(super) fn handle_connect(
@@ -173,6 +175,7 @@ pub(super) fn handle_examine(
                 entity,
                 client_id,
                 registry,
+                None,
                 |obj| matches!(obj, crate::quest::QuestObjectiveDef::Examine { item_id: id, .. } if *id == item_id),
             );
         }
@@ -408,12 +411,74 @@ pub(super) fn handle_quit(state: &mut GameState, client_id: ClientId, registry: 
             state.world.despawn(item_ent).ok();
         }
 
+        // Clean up any active combat so opponents don't swing at a ghost.
+        clear_combat(&mut state.world, entity);
+
         if let Some(save_data) = state.extract_save_data(entity) {
             state.pending_saves.push(save_data);
         }
         state.world.despawn(entity).ok();
     }
     state.pending_commands.remove(&client_id);
+}
+
+pub(super) fn handle_help(
+    state: &GameState,
+    client_id: ClientId,
+    topic: Option<&str>,
+    registry: &OutputRegistry,
+) {
+    let is_admin = state
+        .player_registry
+        .get_entity(client_id)
+        .map(|e| state.world.get::<&AdminFlag>(e).is_ok())
+        .unwrap_or(false);
+
+    match topic {
+        None => {
+            let mut lines = vec!["<yellow>=== Help ===</yellow>".to_string()];
+            for &cat in CATEGORIES {
+                let entries: Vec<_> = HELP_ENTRIES
+                    .iter()
+                    .filter(|e| e.category == cat && (!e.admin_only || is_admin))
+                    .collect();
+                if entries.is_empty() {
+                    continue;
+                }
+                lines.push(format!("\n<yellow>{cat}</yellow>"));
+                for e in entries {
+                    let cmd_col = if e.aliases.is_empty() {
+                        e.syntax.to_string()
+                    } else {
+                        format!("{} ({})", e.syntax, e.aliases)
+                    };
+                    lines.push(format!("  {:<34}  {}", cmd_col, e.description));
+                }
+            }
+            lines.push("\nType 'help <command>' for details on a specific command.".to_string());
+            send_to_client(registry, client_id, lines.join("\n"));
+        }
+        Some(topic) => match find_entry(topic, is_admin) {
+            Some(e) => {
+                let mut lines = vec![format!("<yellow>{}</yellow>", e.syntax)];
+                if !e.aliases.is_empty() {
+                    lines.push(format!("  Aliases:  {}", e.aliases));
+                }
+                lines.push(format!("  {}", e.description));
+                send_to_client(registry, client_id, lines.join("\n"));
+            }
+            None => {
+                send_to_client(
+                    registry,
+                    client_id,
+                    format!(
+                        "No help found for '{}'. Type 'help' for a full list.",
+                        topic
+                    ),
+                );
+            }
+        },
+    }
 }
 
 pub(super) fn handle_unknown(client_id: ClientId, raw: &str, registry: &OutputRegistry) {

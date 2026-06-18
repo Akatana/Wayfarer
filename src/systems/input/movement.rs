@@ -1,8 +1,9 @@
 use crate::command::ClientId;
-use crate::components::{ClientConnection, Name, Position};
+use crate::components::{ClientConnection, InCombat, Name, Position};
 use crate::direction::Direction;
 use crate::game_state::GameState;
 use crate::systems::{
+    combat::clear_combat,
     movement,
     output::{send_to_client, OutputRegistry},
 };
@@ -34,6 +35,12 @@ pub(super) fn handle_move(
     match new_pos {
         Some(pos) => {
             let new_room_id = pos.room_id;
+
+            // Break combat when the player moves — fleeing ends the fight.
+            let was_in_combat = state.world.get::<&InCombat>(entity).is_ok();
+            if was_in_combat {
+                clear_combat(&mut state.world, entity);
+            }
 
             let old_occupants: Vec<ClientId> = {
                 let mut q = state.world.query::<(&Position, &ClientConnection)>();
@@ -77,6 +84,7 @@ pub(super) fn handle_move(
                 entity,
                 client_id,
                 registry,
+                None,
                 |obj| matches!(obj, crate::quest::QuestObjectiveDef::Reach { room_id, .. } if *room_id == new_room_id),
             );
 

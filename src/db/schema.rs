@@ -44,6 +44,12 @@ pub async fn create_tables(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr
 
     // Additive migrations — fail silently on fresh DBs that already have the column.
     for sql in [
+        "ALTER TABLE npcs ADD COLUMN max_hp       INTEGER NOT NULL DEFAULT 20",
+        "ALTER TABLE npcs ADD COLUMN min_damage   INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE npcs ADD COLUMN max_damage   INTEGER NOT NULL DEFAULT 4",
+        "ALTER TABLE npcs ADD COLUMN attack_ticks INTEGER NOT NULL DEFAULT 10",
+        "ALTER TABLE npcs ADD COLUMN xp_reward    INTEGER NOT NULL DEFAULT 10",
+        "ALTER TABLE npcs ADD COLUMN passive      INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE characters ADD COLUMN account_id      INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE characters ADD COLUMN strength        INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE characters ADD COLUMN dexterity       INTEGER NOT NULL DEFAULT 0",
@@ -83,12 +89,18 @@ pub async fn create_tables(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr
     db.execute(Statement::from_string(
         DbBackend::Sqlite,
         "CREATE TABLE IF NOT EXISTS npcs (
-            id          INTEGER PRIMARY KEY,
-            name        TEXT    NOT NULL,
-            description TEXT    NOT NULL DEFAULT '',
-            greeting    TEXT,
-            hostile     INTEGER NOT NULL DEFAULT 0,
-            room_id     INTEGER NOT NULL DEFAULT 1
+            id           INTEGER PRIMARY KEY,
+            name         TEXT    NOT NULL,
+            description  TEXT    NOT NULL DEFAULT '',
+            greeting     TEXT,
+            hostile      INTEGER NOT NULL DEFAULT 0,
+            passive      INTEGER NOT NULL DEFAULT 0,
+            room_id      INTEGER NOT NULL DEFAULT 1,
+            max_hp       INTEGER NOT NULL DEFAULT 20,
+            min_damage   INTEGER NOT NULL DEFAULT 1,
+            max_damage   INTEGER NOT NULL DEFAULT 4,
+            attack_ticks INTEGER NOT NULL DEFAULT 10,
+            xp_reward    INTEGER NOT NULL DEFAULT 10
         )"
         .to_string(),
     ))

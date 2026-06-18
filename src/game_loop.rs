@@ -5,7 +5,7 @@ use tokio::time::{interval, Duration};
 
 use crate::command::{ClientId, PlayerInput};
 use crate::game_state::GameState;
-use crate::systems::{input, npc_routine};
+use crate::systems::{combat, input, npc_routine};
 
 /// Fixed tick duration: 200 ms → 5 ticks per real-world second.
 pub const TICK_DURATION_MS: u64 = 200;
@@ -71,11 +71,19 @@ pub async fn run(
         .map(|def| (def.id, def))
         .collect();
 
+    // Load NPC dialogue trees from the asset file (no DB storage — data is in-memory only).
+    let dialogue_defs: std::collections::HashMap<i64, crate::dialogue::NpcDialogue> =
+        crate::world::loader::load_dialogues(std::path::Path::new("assets/dialogues.json"))
+            .into_iter()
+            .map(|d| (d.npc_id, d))
+            .collect();
+
     let mut state = GameState::with_rooms(room_registry);
     state.next_room_id = max_room_id + 1;
     state.next_item_id = max_item_id + 1;
     state.next_npc_id = max_npc_id + 1;
     state.quest_defs = quest_defs;
+    state.dialogue_defs = dialogue_defs;
     crate::world::seed::spawn_items(&mut state.world, &room_items);
     crate::world::seed::spawn_npcs(&mut state.world, &npcs);
 
@@ -199,6 +207,9 @@ pub async fn run(
                     AdminDbOp::UpdateNpcHostile { id, hostile } => {
                         crate::db::npc::update_hostile(&db, id, hostile).await
                     }
+                    AdminDbOp::UpdateNpcPassive { id, passive } => {
+                        crate::db::npc::update_passive(&db, id, passive).await
+                    }
                     AdminDbOp::SetNpcPatrol { id, rooms } => {
                         crate::db::npc::set_patrol(&db, id, &rooms).await
                     }
@@ -220,9 +231,16 @@ pub async fn run(
 
         // Phase 3: NPC Routine System
         let tick = state.current_tick;
-        npc_routine::npc_routine_system(&mut state.world, tick, &mut state.pending_npc_saves);
+        npc_routine::npc_routine_system(
+            &mut state.world,
+            tick,
+            &mut state.pending_npc_saves,
+            &output_registry,
+            &state.room_registry,
+        );
 
-        // Phase 4: Game State Updates  (combat, levelling — future systems)
+        // Phase 4: Combat System
+        combat::combat_system(&mut state, &output_registry);
 
         // Phase 5: Output Broadcast
         // Production: iterate active players and flush their pending output.

@@ -150,6 +150,9 @@ pub struct NpcDescription(pub String);
 /// Marker: NPC is hostile to players. No combat effect yet — used for display.
 pub struct Hostile;
 
+/// Marker: NPC will not retaliate when attacked by a player.
+pub struct Passive;
+
 /// Ordered patrol route for an NPC — cycles through room_ids on each routine tick.
 pub struct PatrolRoute {
     pub rooms: Vec<u64>,
@@ -162,10 +165,46 @@ pub struct PatrolRoute {
 /// A player's current wealth stored as raw copper (1g = 100s = 10,000c).
 pub struct Wallet(pub i64);
 
+// ── Combat components ─────────────────────────────────────────────────────────
+
+/// Runtime health and combat stats for an NPC entity.
+/// Players use the `Stats` component instead.
+pub struct NpcCombatStats {
+    pub hp: i32,
+    pub max_hp: i32,
+    pub min_damage: i32,
+    pub max_damage: i32,
+    /// Ticks between each NPC attack (200ms/tick → 10 ticks = 2 s).
+    pub attack_ticks: u64,
+    /// XP awarded to the player who delivers the killing blow.
+    pub xp_reward: i32,
+}
+
+/// Present on any entity currently in active combat.
+pub struct InCombat {
+    pub target: hecs::Entity,
+    pub last_attack_tick: u64,
+    /// Ticks between this entity's attacks.
+    pub attack_interval: u64,
+    /// False when the entity is being attacked but hasn't chosen to fight back yet.
+    /// Pass 1 of the combat system skips entities with attacking = false.
+    pub attacking: bool,
+}
+
 // ── Quest components ──────────────────────────────────────────────────────────
 
 /// All quest states for a player entity. Always present on spawned players.
 pub struct PlayerQuests(pub Vec<crate::quest::PlayerQuestState>);
+
+// ── Dialogue components ───────────────────────────────────────────────────────
+
+/// Marks a player as currently mid-conversation with an NPC.
+/// Removed automatically when the conversation ends or the player moves.
+pub struct InDialogue {
+    pub npc_entity: hecs::Entity,
+    pub npc_db_id: i64,
+    pub node_id: String,
+}
 
 #[cfg(test)]
 mod tests {

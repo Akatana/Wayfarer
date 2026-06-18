@@ -10,10 +10,40 @@ pub struct NpcData {
     pub greeting: Option<String>,
     #[serde(default)]
     pub hostile: bool,
+    #[serde(default)]
+    pub passive: bool,
     pub room_id: u64,
     /// Ordered list of room_ids to patrol; empty means the NPC is stationary.
     #[serde(default)]
     pub patrol: Vec<u64>,
+    // ── Combat stats ─────────────────────────────────────────────────────────
+    #[serde(default = "default_max_hp")]
+    pub max_hp: i32,
+    #[serde(default = "default_min_damage")]
+    pub min_damage: i32,
+    #[serde(default = "default_max_damage")]
+    pub max_damage: i32,
+    /// Ticks between attacks (200ms/tick → 10 ticks = 2 s).
+    #[serde(default = "default_attack_ticks")]
+    pub attack_ticks: u64,
+    #[serde(default = "default_xp_reward")]
+    pub xp_reward: i32,
+}
+
+fn default_max_hp() -> i32 {
+    20
+}
+fn default_min_damage() -> i32 {
+    1
+}
+fn default_max_damage() -> i32 {
+    4
+}
+fn default_attack_ticks() -> u64 {
+    10
+}
+fn default_xp_reward() -> i32 {
+    10
 }
 
 /// Queued DB write when a patrolling NPC moves to a new room.
@@ -22,4 +52,11 @@ pub struct NpcData {
 pub struct NpcRoomSave {
     pub npc_id: i64,
     pub room_id: u64,
+}
+
+/// Queued NPC respawn. When `respawn_at_tick` is reached the combat system
+/// re-spawns the NPC using the original `data`.
+pub struct NpcRespawn {
+    pub data: NpcData,
+    pub respawn_at_tick: u64,
 }

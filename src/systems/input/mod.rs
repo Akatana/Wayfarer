@@ -1,4 +1,5 @@
 mod admin;
+mod combat;
 mod items;
 mod movement;
 mod npcs;
@@ -8,13 +9,14 @@ use tokio::sync::mpsc;
 
 use crate::command::{ClientId, Command, PlayerInput};
 use crate::components::{
-    BagCapacity, CharacterId, Equipped, Hostile, InInventory, ItemId, ItemName, Name, NpcId,
-    PlayerQuests, Position, RoomContents, Stats, TwoHanded,
+    BagCapacity, CharacterId, Equipped, Hostile, InDialogue, InInventory, ItemId, ItemName, Name,
+    NpcId, PlayerQuests, Position, RoomContents, Stats, TwoHanded,
 };
+use crate::dialogue::{DialogueCondition, DialogueEffect};
 use crate::game_state::GameState;
 use crate::item::{EquipSlot, ItemLocation, ItemLocationSave};
-use crate::quest::{PlayerQuestState, QuestObjectiveDef, QuestSave, QuestStatus};
-use crate::systems::output::OutputRegistry;
+use crate::quest::{PlayerQuestState, QuestDef, QuestObjectiveDef, QuestSave, QuestStatus};
+use crate::systems::output::{send_to_client, OutputRegistry};
 
 const BASE_INVENTORY_LIMIT: usize = 20;
 
@@ -56,6 +58,51 @@ pub fn process_input(
 
 fn dispatch(state: &mut GameState, input: PlayerInput, registry: &OutputRegistry) {
     let id = input.client_id;
+
+    // ── Dialogue intercept ────────────────────────────────────────────────────
+    // If the player is mid-conversation, most commands are blocked. Movement
+    // and combat exit dialogue and fall through to normal handling.
+    if !matches!(input.command, Command::Connect(_)) {
+        if let Some(entity) = state.player_registry.get_entity(id) {
+            let in_dialogue = state
+                .world
+                .get::<&InDialogue>(entity)
+                .ok()
+                .map(|d| (d.npc_entity, d.npc_db_id, d.node_id.clone()));
+            if in_dialogue.is_some() {
+                match &input.command {
+                    Command::DialogueChoice(n) => {
+                        let n = *n;
+                        handle_dialogue_choice(state, id, n, registry);
+                        return;
+                    }
+                    Command::Quit => {
+                        // Treat quit/bye as "end conversation" while in dialogue.
+                        state.world.remove_one::<InDialogue>(entity).ok();
+                        send_to_client(
+                            registry,
+                            id,
+                            "You say goodbye and end the conversation.".to_string(),
+                        );
+                        return;
+                    }
+                    Command::Move(_) | Command::Flee | Command::Attack(_) => {
+                        // Exit dialogue; fall through to process the command normally.
+                        state.world.remove_one::<InDialogue>(entity).ok();
+                    }
+                    _ => {
+                        send_to_client(
+                            registry,
+                            id,
+                            "You are in a conversation. Enter a number to respond, or type 'bye' to leave.".to_string(),
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     match input.command {
         Command::Connect(data) => world::handle_connect(state, id, data, registry),
         Command::Look => world::handle_look(state, id, registry),
@@ -69,6 +116,9 @@ fn dispatch(state: &mut GameState, input: PlayerInput, registry: &OutputRegistry
         Command::Examine(target) => world::handle_examine(state, id, &target, registry),
         Command::Score => world::handle_score(state, id, registry),
         Command::Quit => world::handle_quit(state, id, registry),
+        Command::Help(topic) => world::handle_help(state, id, topic.as_deref(), registry),
+        Command::Attack(target) => combat::handle_attack(state, id, &target, registry),
+        Command::Flee => combat::handle_flee(state, id, registry),
         Command::Talk(target) => npcs::handle_talk(state, id, &target, registry),
         Command::Balance => world::handle_balance(state, id, registry),
         Command::QuestLog => world::handle_quest_log(state, id, registry),
@@ -110,6 +160,9 @@ fn dispatch(state: &mut GameState, input: PlayerInput, registry: &OutputRegistry
         Command::AdminNhostile(npc_id, hostile) => {
             admin::handle_admin_nhostile(state, id, npc_id, hostile, registry)
         }
+        Command::AdminNpassive(npc_id, passive) => {
+            admin::handle_admin_npassive(state, id, npc_id, passive, registry)
+        }
         Command::AdminNpatrol(npc_id, spec) => {
             admin::handle_admin_npatrol(state, id, npc_id, spec, registry)
         }
@@ -122,6 +175,14 @@ fn dispatch(state: &mut GameState, input: PlayerInput, registry: &OutputRegistry
         }
         Command::AdminQreset(name, quest_id) => {
             admin::handle_admin_qreset(state, id, name, quest_id, registry)
+        }
+        Command::DialogueChoice(_) => {
+            // Typed a number while not in dialogue — treat as unknown.
+            send_to_client(
+                registry,
+                id,
+                "You aren't in a conversation right now.".to_string(),
+            );
         }
         Command::Unknown(raw) => world::handle_unknown(id, &raw, registry),
     }
@@ -215,6 +276,7 @@ fn quest_mark_objective(
     entity: hecs::Entity,
     client_id: ClientId,
     registry: &OutputRegistry,
+    quest_id_filter: Option<i64>,
     predicate: impl Fn(&QuestObjectiveDef) -> bool,
 ) {
     use crate::systems::output::send_to_client;
@@ -226,6 +288,7 @@ fn quest_mark_objective(
         };
         pq.0.iter()
             .filter(|s| s.status == QuestStatus::Active)
+            .filter(|s| quest_id_filter.is_none_or(|id| s.quest_id == id))
             .flat_map(|s| {
                 let def = state.quest_defs.get(&s.quest_id)?;
                 let phase = def.phases.get(s.phase)?;
@@ -708,6 +771,416 @@ fn effective_inventory_limit(world: &hecs::World, owner: hecs::Entity) -> usize 
             .sum()
     };
     BASE_INVENTORY_LIMIT + bonus
+}
+
+// ── Dialogue helpers ──────────────────────────────────────────────────────────
+
+/// Displays a dialogue node to the player: NPC speech then numbered options.
+/// Removes `InDialogue` and prints "(The conversation ends.)" if no options are visible.
+pub(super) fn show_dialogue_node(
+    state: &mut GameState,
+    client_id: ClientId,
+    npc_entity: hecs::Entity,
+    node_id: &str,
+    registry: &OutputRegistry,
+) {
+    let Some(player_entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+
+    let npc_name = state
+        .world
+        .get::<&Name>(npc_entity)
+        .ok()
+        .map(|n| n.0.clone())
+        .unwrap_or_else(|| "???".to_string());
+
+    let npc_db_id = state
+        .world
+        .get::<&NpcId>(npc_entity)
+        .ok()
+        .map(|n| n.0)
+        .unwrap_or(0);
+
+    let player_quests = state
+        .world
+        .get::<&PlayerQuests>(player_entity)
+        .ok()
+        .map(|pq| pq.0.clone())
+        .unwrap_or_default();
+    let player_level = state
+        .world
+        .get::<&Stats>(player_entity)
+        .ok()
+        .map(|s| s.level)
+        .unwrap_or(1);
+
+    let dialogue = match state.dialogue_defs.get(&npc_db_id) {
+        Some(d) => d,
+        None => return,
+    };
+    let node = match dialogue.find_node(node_id) {
+        Some(n) => n,
+        None => return,
+    };
+
+    let visible: Vec<&crate::dialogue::DialogueOption> = node
+        .options
+        .iter()
+        .filter(|opt| {
+            check_conditions(
+                &opt.conditions,
+                &player_quests,
+                player_level,
+                &state.quest_defs,
+            )
+        })
+        .collect();
+
+    send_to_client(
+        registry,
+        client_id,
+        format!("{} says: \"{}\"", npc_name, node.text),
+    );
+
+    if visible.is_empty() {
+        state.world.remove_one::<InDialogue>(player_entity).ok();
+        send_to_client(registry, client_id, "(The conversation ends.)".to_string());
+    } else {
+        for (i, opt) in visible.iter().enumerate() {
+            send_to_client(registry, client_id, format!("  [{}] {}", i + 1, opt.text));
+        }
+    }
+}
+
+/// Handles the player typing a numeric dialogue choice.
+fn handle_dialogue_choice(
+    state: &mut GameState,
+    client_id: ClientId,
+    choice: usize,
+    registry: &OutputRegistry,
+) {
+    let Some(player_entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+
+    // Clone dialogue state to release the borrow.
+    let (npc_entity, npc_db_id, node_id) = {
+        let Ok(dlg) = state.world.get::<&InDialogue>(player_entity) else {
+            return;
+        };
+        (dlg.npc_entity, dlg.npc_db_id, dlg.node_id.clone())
+    };
+
+    // Ensure NPC is still in the same room.
+    let player_room = state
+        .world
+        .get::<&Position>(player_entity)
+        .ok()
+        .map(|p| p.room_id);
+    let npc_room = state
+        .world
+        .get::<&Position>(npc_entity)
+        .ok()
+        .map(|p| p.room_id);
+    if player_room.is_none() || player_room != npc_room {
+        state.world.remove_one::<InDialogue>(player_entity).ok();
+        send_to_client(registry, client_id, "The conversation ends.".to_string());
+        return;
+    }
+
+    // Clone what we need to avoid borrow conflicts.
+    let dialogue = match state.dialogue_defs.get(&npc_db_id).cloned() {
+        Some(d) => d,
+        None => {
+            state.world.remove_one::<InDialogue>(player_entity).ok();
+            return;
+        }
+    };
+    let player_quests = state
+        .world
+        .get::<&PlayerQuests>(player_entity)
+        .ok()
+        .map(|pq| pq.0.clone())
+        .unwrap_or_default();
+    let player_level = state
+        .world
+        .get::<&Stats>(player_entity)
+        .ok()
+        .map(|s| s.level)
+        .unwrap_or(1);
+
+    let node = match dialogue.find_node(&node_id) {
+        Some(n) => n,
+        None => {
+            state.world.remove_one::<InDialogue>(player_entity).ok();
+            return;
+        }
+    };
+
+    // Determine which options are visible (cloned indices).
+    let visible_indices: Vec<usize> = node
+        .options
+        .iter()
+        .enumerate()
+        .filter(|(_, opt)| {
+            check_conditions(
+                &opt.conditions,
+                &player_quests,
+                player_level,
+                &state.quest_defs,
+            )
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    let idx = choice.saturating_sub(1);
+    let Some(&real_idx) = visible_indices.get(idx) else {
+        let max = visible_indices.len();
+        send_to_client(
+            registry,
+            client_id,
+            format!("Please enter a number between 1 and {max}."),
+        );
+        return;
+    };
+
+    let option = node.options[real_idx].clone();
+
+    // Apply effects (needs &mut state).
+    for effect in &option.effects {
+        apply_dialogue_effect(
+            state,
+            player_entity,
+            client_id,
+            npc_db_id,
+            npc_entity,
+            effect,
+            registry,
+        );
+    }
+
+    // Navigate to next node or end conversation.
+    match option.goto {
+        Some(next_id) => {
+            // Re-read updated quest state for the next node's condition checks.
+            let updated_quests = state
+                .world
+                .get::<&PlayerQuests>(player_entity)
+                .ok()
+                .map(|pq| pq.0.clone())
+                .unwrap_or_default();
+            let updated_level = state
+                .world
+                .get::<&Stats>(player_entity)
+                .ok()
+                .map(|s| s.level)
+                .unwrap_or(1);
+
+            let dialogue = match state.dialogue_defs.get(&npc_db_id).cloned() {
+                Some(d) => d,
+                None => {
+                    state.world.remove_one::<InDialogue>(player_entity).ok();
+                    return;
+                }
+            };
+            let next_node = match dialogue.find_node(&next_id) {
+                Some(n) => n.clone(),
+                None => {
+                    state.world.remove_one::<InDialogue>(player_entity).ok();
+                    return;
+                }
+            };
+
+            // Update the player's dialogue state.
+            if let Ok(mut dlg) = state.world.get::<&mut InDialogue>(player_entity) {
+                dlg.node_id = next_id.clone();
+            }
+
+            // Show the next node.
+            let npc_name = state
+                .world
+                .get::<&Name>(npc_entity)
+                .ok()
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+
+            let next_visible: Vec<&crate::dialogue::DialogueOption> = next_node
+                .options
+                .iter()
+                .filter(|opt| {
+                    check_conditions(
+                        &opt.conditions,
+                        &updated_quests,
+                        updated_level,
+                        &state.quest_defs,
+                    )
+                })
+                .collect();
+
+            send_to_client(
+                registry,
+                client_id,
+                format!("{} says: \"{}\"", npc_name, next_node.text),
+            );
+            if next_visible.is_empty() {
+                state.world.remove_one::<InDialogue>(player_entity).ok();
+                send_to_client(registry, client_id, "(The conversation ends.)".to_string());
+            } else {
+                for (i, opt) in next_visible.iter().enumerate() {
+                    send_to_client(registry, client_id, format!("  [{}] {}", i + 1, opt.text));
+                }
+            }
+        }
+        None => {
+            state.world.remove_one::<InDialogue>(player_entity).ok();
+            let npc_name = state
+                .world
+                .get::<&Name>(npc_entity)
+                .ok()
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            send_to_client(
+                registry,
+                client_id,
+                format!("You end your conversation with {}.", npc_name),
+            );
+        }
+    }
+}
+
+/// Evaluates all conditions for a dialogue option against the player's current state.
+fn check_conditions(
+    conditions: &[DialogueCondition],
+    player_quests: &[PlayerQuestState],
+    player_level: i32,
+    _quest_defs: &std::collections::HashMap<i64, QuestDef>,
+) -> bool {
+    conditions.iter().all(|cond| match cond {
+        DialogueCondition::QuestNotStarted { quest_id } => {
+            !player_quests.iter().any(|q| q.quest_id == *quest_id)
+        }
+        DialogueCondition::QuestActive { quest_id } => player_quests
+            .iter()
+            .any(|q| q.quest_id == *quest_id && q.status == QuestStatus::Active),
+        DialogueCondition::QuestPhase { quest_id, phase } => player_quests.iter().any(|q| {
+            q.quest_id == *quest_id && q.phase == *phase && q.status == QuestStatus::Active
+        }),
+        DialogueCondition::QuestReady { quest_id } => player_quests
+            .iter()
+            .any(|q| q.quest_id == *quest_id && q.status == QuestStatus::ReadyToTurnIn),
+        DialogueCondition::QuestReadyAtPhase { quest_id, phase } => player_quests.iter().any(|q| {
+            q.quest_id == *quest_id && q.phase == *phase && q.status == QuestStatus::ReadyToTurnIn
+        }),
+        DialogueCondition::QuestComplete { quest_id } => player_quests
+            .iter()
+            .any(|q| q.quest_id == *quest_id && q.status == QuestStatus::Completed),
+        DialogueCondition::MinLevel { level } => player_level >= *level,
+    })
+}
+
+/// Applies a single dialogue effect. Called per-effect when an option is chosen.
+fn apply_dialogue_effect(
+    state: &mut GameState,
+    player_entity: hecs::Entity,
+    client_id: ClientId,
+    npc_db_id: i64,
+    _npc_entity: hecs::Entity,
+    effect: &DialogueEffect,
+    registry: &OutputRegistry,
+) {
+    let char_id = state
+        .world
+        .get::<&CharacterId>(player_entity)
+        .ok()
+        .map(|c| c.db_id)
+        .unwrap_or(0);
+
+    match effect {
+        DialogueEffect::AcceptQuest { quest_id } => {
+            // Accept a specific quest (skip if already in log).
+            let already_has = state
+                .world
+                .get::<&PlayerQuests>(player_entity)
+                .ok()
+                .map(|pq| pq.0.iter().any(|s| s.quest_id == *quest_id))
+                .unwrap_or(false);
+            if already_has {
+                return;
+            }
+            let quest_def = state.quest_defs.get(quest_id).cloned();
+            if let Some(def) = quest_def {
+                let num_objs = def.phases.first().map(|p| p.objectives.len()).unwrap_or(0);
+                let new_state = PlayerQuestState::new_active(def.id, num_objs);
+                {
+                    let Ok(mut pq) = state.world.get::<&mut PlayerQuests>(player_entity) else {
+                        return;
+                    };
+                    pq.0.push(new_state.clone());
+                }
+                state.pending_quest_saves.push(QuestSave {
+                    char_id,
+                    state: new_state,
+                });
+                let phase_desc = def
+                    .phases
+                    .first()
+                    .map(|p| p.description.as_str())
+                    .unwrap_or("");
+                send_to_client(
+                    registry,
+                    client_id,
+                    format!(
+                        "<yellow>[Quest Accepted]</yellow> {}\n   {}\n   Objective: {}",
+                        def.name, def.description, phase_desc
+                    ),
+                );
+            }
+        }
+        DialogueEffect::MarkObjective { quest_id } => {
+            let qid = *quest_id;
+            quest_mark_objective(
+                state,
+                player_entity,
+                client_id,
+                registry,
+                Some(qid),
+                |obj| matches!(obj, QuestObjectiveDef::Talk { npc_id, .. } if *npc_id == npc_db_id),
+            );
+        }
+        DialogueEffect::TurnInQuest => {
+            quest_turn_in(state, player_entity, npc_db_id, client_id, registry);
+        }
+        DialogueEffect::GiveItem { item_id } => {
+            let item_entity = {
+                let mut q = state.world.query::<(&ItemId, &ItemName)>();
+                q.iter()
+                    .find(|(_, (id, _))| id.0 == *item_id)
+                    .map(|(e, (_, name))| (e, name.0.clone()))
+            };
+            if let Some((item_entity, item_name)) = item_entity {
+                state.world.remove_one::<RoomContents>(item_entity).ok();
+                state
+                    .world
+                    .insert_one(
+                        item_entity,
+                        InInventory {
+                            owner: player_entity,
+                        },
+                    )
+                    .ok();
+                state.pending_item_saves.push(ItemLocationSave {
+                    item_id: *item_id,
+                    location: ItemLocation::Inventory { char_id },
+                });
+                send_to_client(
+                    registry,
+                    client_id,
+                    format!("<yellow>You receive: {item_name}.</yellow>"),
+                );
+            }
+        }
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

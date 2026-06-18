@@ -104,6 +104,19 @@ pub fn load_quests(quests_path: &Path) -> Vec<crate::quest::QuestDef> {
     serde_json::from_str(&src).unwrap_or_else(|e| panic!("Invalid JSON in {:?}: {e}", quests_path))
 }
 
+/// Loads NPC dialogue trees from `dialogues_path` (a JSON array of `NpcDialogue`).
+///
+/// Returns an empty list if the file does not exist; panics on malformed JSON.
+pub fn load_dialogues(dialogues_path: &Path) -> Vec<crate::dialogue::NpcDialogue> {
+    if !dialogues_path.exists() {
+        return Vec::new();
+    }
+    let src = std::fs::read_to_string(dialogues_path)
+        .unwrap_or_else(|e| panic!("Cannot read {:?}: {e}", dialogues_path));
+    serde_json::from_str(&src)
+        .unwrap_or_else(|e| panic!("Invalid JSON in {:?}: {e}", dialogues_path))
+}
+
 // ── Internals ─────────────────────────────────────────────────────────────────
 
 fn load_rooms_internal(rooms_dir: &Path) -> (RoomRegistry, HashMap<u64, Vec<i64>>) {

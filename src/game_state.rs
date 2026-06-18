@@ -6,6 +6,7 @@ use crate::components::{
     AdminFlag, BagCapacity, CharacterId, ClientConnection, Equipped, InInventory, ItemDescription,
     ItemId, ItemName, ItemSlot, Name, PlayerQuests, Position, Stats, TwoHanded, Wallet,
 };
+use crate::dialogue::NpcDialogue;
 use crate::direction::Direction;
 use crate::item::{ItemData, ItemLocation, ItemLocationSave};
 use crate::npc::{NpcData, NpcRoomSave};
@@ -73,6 +74,10 @@ pub enum AdminDbOp {
         id: i64,
         hostile: bool,
     },
+    UpdateNpcPassive {
+        id: i64,
+        passive: bool,
+    },
     /// Replaces the patrol route; empty `rooms` clears it.
     SetNpcPatrol {
         id: i64,
@@ -105,10 +110,14 @@ pub struct GameState {
     pub next_npc_id: i64,
     /// All loaded quest definitions keyed by quest id. Immutable after startup.
     pub quest_defs: HashMap<i64, QuestDef>,
+    /// All loaded NPC dialogue trees keyed by npc_db_id. Immutable after startup.
+    pub dialogue_defs: HashMap<i64, NpcDialogue>,
     /// Player quest state changes waiting to be persisted on the next inter-tick drain.
     pub pending_quest_saves: Vec<QuestSave>,
     /// Per-player command queues. Each tick processes exactly one command per player.
     pub pending_commands: HashMap<ClientId, VecDeque<Command>>,
+    /// NPCs scheduled to respawn. Checked every tick by the combat system.
+    pub pending_respawns: Vec<crate::npc::NpcRespawn>,
 }
 
 impl GameState {
@@ -133,8 +142,10 @@ impl GameState {
             next_item_id: 1001,
             next_npc_id: 1001,
             quest_defs: HashMap::new(),
+            dialogue_defs: HashMap::new(),
             pending_quest_saves: Vec::new(),
             pending_commands: HashMap::new(),
+            pending_respawns: Vec::new(),
         }
     }
 

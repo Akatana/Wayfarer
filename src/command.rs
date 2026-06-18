@@ -45,6 +45,8 @@ pub enum Command {
     Score,
     /// Initiate a graceful disconnect and save.
     Quit,
+    /// Show command help. `None` = full listing; `Some(topic)` = detail for that command.
+    Help(Option<String>),
     /// List all online players (admin only).
     AdminWho,
     /// Teleport to a room by id (admin only).
@@ -73,6 +75,10 @@ pub enum Command {
     AdminIslot(i64, String),
     /// Set one stat requirement on an item by id: stat ∈ {str, dex, knw, level} (admin only).
     AdminIreq(i64, String, i32),
+    /// Initiate combat with a named NPC in the current room.
+    Attack(String),
+    /// Break off combat and flee to a random exit.
+    Flee,
     /// Start a conversation with a named NPC in the current room.
     Talk(String),
     /// Create an NPC in the current room (admin): "name [/ description]".
@@ -87,6 +93,8 @@ pub enum Command {
     AdminNgreet(i64, String),
     /// Toggle an NPC's hostile flag by id (admin): "true" or "false".
     AdminNhostile(i64, bool),
+    /// Toggle an NPC's passive flag by id (admin): "true" or "false".
+    AdminNpassive(i64, bool),
     /// Set an NPC's patrol route by id — comma-separated room ids or "none" to clear (admin).
     AdminNpatrol(i64, String),
     /// List all NPCs with their ids and current rooms (admin).
@@ -105,6 +113,8 @@ pub enum Command {
     AdminQgive(String, i64),
     /// Reset an online player's quest to its start (admin).
     AdminQreset(String, i64),
+    /// A numeric dialogue choice (1–9) typed while in conversation with an NPC.
+    DialogueChoice(usize),
     /// Input that could not be mapped to a known command.
     Unknown(String),
 }

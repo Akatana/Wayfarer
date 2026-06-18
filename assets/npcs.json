@@ -6,7 +6,12 @@
     "greeting": "Move along, citizen. Nothing to see here.",
     "hostile": false,
     "room_id": 1,
-    "patrol": [1, 2, 1, 2]
+    "patrol": [1, 2, 1, 2],
+    "max_hp": 60,
+    "min_damage": 2,
+    "max_damage": 6,
+    "attack_ticks": 8,
+    "xp_reward": 25
   },
   {
     "id": 2,
@@ -15,7 +20,12 @@
     "greeting": "The roads north are dangerous. You have been warned.",
     "hostile": false,
     "room_id": 2,
-    "patrol": []
+    "patrol": [],
+    "max_hp": 40,
+    "min_damage": 3,
+    "max_damage": 7,
+    "attack_ticks": 7,
+    "xp_reward": 30
   },
   {
     "id": 3,
@@ -24,6 +34,11 @@
     "greeting": null,
     "hostile": true,
     "room_id": 3,
-    "patrol": [3, 4, 3, 4]
+    "patrol": [3, 4, 3, 4],
+    "max_hp": 25,
+    "min_damage": 1,
+    "max_damage": 5,
+    "attack_ticks": 6,
+    "xp_reward": 15
   }
 ]

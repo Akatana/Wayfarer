@@ -1,6 +1,6 @@
 ﻿use crate::command::ClientId;
 use crate::components::{
-    Hostile, Name, NpcDescription, NpcGreeting, NpcId, NpcRoutine, PatrolRoute, Position,
+    Hostile, Name, NpcDescription, NpcGreeting, NpcId, NpcRoutine, Passive, PatrolRoute, Position,
 };
 use crate::game_state::{AdminDbOp, GameState};
 use crate::npc::NpcData;
@@ -49,8 +49,14 @@ pub(crate) fn handle_admin_mnpc(
         description: description.clone(),
         greeting: None,
         hostile: false,
+        passive: false,
         room_id,
         patrol: Vec::new(),
+        max_hp: 20,
+        min_damage: 1,
+        max_damage: 4,
+        attack_ticks: 10,
+        xp_reward: 10,
     };
 
     state.world.spawn((
@@ -285,6 +291,45 @@ pub(crate) fn handle_admin_nhostile(
     );
 }
 
+pub(crate) fn handle_admin_npassive(
+    state: &mut GameState,
+    client_id: ClientId,
+    npc_id: i64,
+    passive: bool,
+    registry: &OutputRegistry,
+) {
+    let Some(entity) = state.player_registry.get_entity(client_id) else {
+        return;
+    };
+    if !super::require_admin(state, client_id, entity, registry) {
+        return;
+    }
+    let Some(npc_ent) = find_npc_entity(&state.world, npc_id) else {
+        send_to_client(
+            registry,
+            client_id,
+            format!("No NPC with id #{npc_id} exists."),
+        );
+        return;
+    };
+
+    if passive {
+        state.world.insert(npc_ent, (Passive,)).ok();
+    } else {
+        state.world.remove::<(Passive,)>(npc_ent).ok();
+    }
+    state.pending_admin_ops.push(AdminDbOp::UpdateNpcPassive {
+        id: npc_id,
+        passive,
+    });
+    let label = if passive { "passive" } else { "retaliating" };
+    send_to_client(
+        registry,
+        client_id,
+        format!("<dim>[Admin] NPC #{npc_id} is now {label}.</dim>"),
+    );
+}
+
 pub(crate) fn handle_admin_npatrol(
     state: &mut GameState,
     client_id: ClientId,
@@ -449,6 +494,7 @@ pub(crate) fn handle_admin_ninfo(
         .map(|g| format!("\"{}\"", g.0))
         .unwrap_or_else(|| "(none)".to_string());
     let hostile = state.world.get::<&Hostile>(npc_ent).is_ok();
+    let passive = state.world.get::<&Passive>(npc_ent).is_ok();
     let room_id = state
         .world
         .get::<&Position>(npc_ent)
@@ -477,6 +523,7 @@ pub(crate) fn handle_admin_ninfo(
         format!("  Description: {desc}"),
         format!("  Greeting:    {greeting}"),
         format!("  Hostile:     {}", if hostile { "yes" } else { "no" }),
+        format!("  Passive:     {}", if passive { "yes" } else { "no" }),
         format!("  Room:        {room_id} ({room_name})"),
         format!("  Patrol:      {patrol_str}"),
     ];

@@ -1,5 +1,5 @@
 use crate::command::ClientId;
-use crate::components::{Name, NpcGreeting, NpcId, Position};
+use crate::components::{InDialogue, Name, NpcGreeting, NpcId, Position};
 use crate::game_state::GameState;
 use crate::systems::output::{send_to_client, OutputRegistry};
 
@@ -35,6 +35,34 @@ pub(super) fn handle_talk(
         return;
     };
 
+    // If this NPC has a dialogue tree, start (or re-enter) the conversation.
+    if state.dialogue_defs.contains_key(&npc_db_id) {
+        // Check if already in dialogue with this NPC — if so, re-show current node.
+        let existing_node = state
+            .world
+            .get::<&InDialogue>(entity)
+            .ok()
+            .filter(|d| d.npc_entity == npc_e)
+            .map(|d| d.node_id.clone());
+
+        let node_id = existing_node.unwrap_or_else(|| "root".to_string());
+
+        // Set/refresh the InDialogue component.
+        let new_dlg = InDialogue {
+            npc_entity: npc_e,
+            npc_db_id,
+            node_id: node_id.clone(),
+        };
+        // Remove old component first (insert_one replaces, but this is explicit).
+        state.world.remove_one::<InDialogue>(entity).ok();
+        state.world.insert_one(entity, new_dlg).ok();
+
+        super::show_dialogue_node(state, client_id, npc_e, &node_id, registry);
+        return;
+    }
+
+    // ── Fallback: NPC has no dialogue tree — use legacy greeting behaviour ──
+
     // Quest: turn in any ready quests for this NPC first.
     super::quest_turn_in(state, entity, npc_db_id, client_id, registry);
 
@@ -47,6 +75,7 @@ pub(super) fn handle_talk(
         entity,
         client_id,
         registry,
+        None,
         |obj| matches!(obj, crate::quest::QuestObjectiveDef::Talk { npc_id, .. } if *npc_id == npc_db_id),
     );
 

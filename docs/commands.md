@@ -19,6 +19,27 @@ Commands are case-insensitive. Arguments in `<angle brackets>` are required; `[s
 | `up` / `u` | Move up |
 | `down` / `d` | Move down |
 
+Moving while in combat breaks combat automatically.
+
+---
+
+## Combat
+
+| Command | Description |
+|---|---|
+| `kill <target>` / `attack <target>` / `k <target>` / `hit <target>` | Attack an NPC in the current room by name |
+| `flee` / `fl` / `run` | Escape combat through the first available exit |
+
+**Combat notes:**
+- Combat is real-time — both sides attack on a per-entity tick timer (every 200 ms tick).
+- Hostile NPCs auto-aggro players who enter their room. The NPC attacks immediately; the player must type `kill <target>` to fight back (AFK protection).
+- If an NPC initiates combat, the player still has `InCombat` tracking and can `flee` without typing `kill` first.
+- Player attack speed scales with Dexterity: `max(3, 10 - DEX/5)` ticks between attacks.
+- Passive NPCs (flag set via `@npassive`) never retaliate when attacked.
+- When you kill an NPC you receive XP. Enough XP causes a level-up.
+- Killed NPCs respawn at their home room after 60 seconds (300 ticks).
+- If a player dies they are teleported back to the starting room with half HP restored.
+
 ---
 
 ## General
@@ -30,6 +51,10 @@ Commands are case-insensitive. Arguments in `<angle brackets>` are required; `[s
 | `say <message>` | Broadcast a message to everyone in the same room |
 | `talk <name>` | Talk to a named NPC in the current room |
 | `score` / `sc` | Display your character stats (level, HP, MP, STR, DEX, KNW, location) |
+| `balance` / `bal` / `money` / `gold` / `wallet` | Show your current wealth |
+| `quests` / `quest` / `ql` | Show your active quest log |
+| `help` / `h` / `?` | Show a full list of commands, grouped by category |
+| `help <command>` | Show details and aliases for a specific command |
 | `quit` / `exit` / `bye` | Save and disconnect |
 
 ---
@@ -123,12 +148,23 @@ Commands are case-insensitive. Arguments in `<angle brackets>` are required; `[s
 | `@mnpc <name> [/ <description>]` | Create a new NPC in the current room. Returns the NPC's `#id`. Example: `@mnpc a town guard / A guard in worn leather armor.` |
 | `@ndestroy <id\|name>` | Permanently destroy an NPC. Accepts a numeric id (world-wide) or a name match in the current room |
 | `@nlist` | List all NPCs in the world with their ids, current rooms, and flags |
-| `@ninfo <id>` | Show full details for an NPC: name, description, greeting, hostile flag, current room, and patrol route |
+| `@ninfo <id>` | Show full details for an NPC: name, description, greeting, hostile/passive flags, current room, and patrol route |
 | `@nname <id> <name>` | Rename an NPC by id |
 | `@ndesc <id> <description>` | Set an NPC's description by id |
 | `@ngreet <id> <text>` | Set an NPC's greeting (shown when a player uses `talk`). Use `none` to clear it |
-| `@nhostile <id> <true\|false>` | Set the NPC's hostile flag. Hostile NPCs are shown in red in room descriptions. Accepts `true`/`yes`/`1` or `false`/`no`/`0` |
+| `@nhostile <id> <true\|false>` | Toggle auto-aggro: hostile NPCs attack any player who enters their room. Accepts `true`/`yes`/`1` or `false`/`no`/`0` |
+| `@npassive <id> <true\|false>` | Toggle retaliation: passive NPCs never fight back when attacked. Accepts `true`/`yes`/`1` or `false`/`no`/`0` |
 | `@npatrol <id> <room_ids>` | Set a patrol route as a comma-separated list of room ids. The NPC advances one step every 60 seconds. Use `none` to clear and make the NPC stationary |
+
+**NPC combat stats** (set in `assets/npcs.json` or directly in the database):
+
+| Field | Default | Description |
+|---|---|---|
+| `max_hp` | 20 | Maximum hit points |
+| `min_damage` | 1 | Minimum damage per attack |
+| `max_damage` | 4 | Maximum damage per attack |
+| `attack_ticks` | 10 | Ticks between NPC attacks (200 ms/tick → 10 = 2 s) |
+| `xp_reward` | 10 | XP awarded to the player who kills this NPC |
 
 **NPC editing example workflow:**
 ```
@@ -142,5 +178,24 @@ Commands are case-insensitive. Arguments in `<angle brackets>` are required; `[s
 
 **Patrol notes:**
 - The patrol list is a cycle — after the last room the NPC wraps back to the first.
+- Players in a room are notified when a patrolling NPC enters or leaves, including the direction.
+- Patrolling NPCs respawn at the first room in their patrol route after being killed.
 - The NPC's current room is persisted to the database so patrol position survives server restarts.
 - If consecutive steps share the same room id, the NPC stays put for that interval (useful for timed pauses).
+
+---
+
+## Admin — Quests
+
+| Command | Description |
+|---|---|
+| `@qlist` | List all quest definitions with their ids and names |
+| `@qinfo <id>` | Show full details for a quest: phases, objectives, completion NPCs, and XP rewards |
+| `@qgive <player name> <quest_id>` | Give a quest to a named player (they must be online) |
+| `@qreset <player name> <quest_id>` | Reset a player's quest back to phase 1, objective 1 |
+
+**Quest notes:**
+- Quests are defined in `assets/quests.json` and seeded into the database on first boot.
+- Quests are awarded automatically when a player `talk`s to an NPC that offers one, or `examine`s a qualifying item.
+- Quest objectives are tracked per-player. Eligible objectives advance automatically on the relevant action (kill, examine, talk).
+- When all objectives in a phase are met, the player must return to the completion NPC to advance or complete the quest.

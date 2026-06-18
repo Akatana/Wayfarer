@@ -10,7 +10,7 @@ pub(super) use items::{
 pub(super) use npcs::{
     handle_admin_mnpc, handle_admin_ndesc, handle_admin_ndestroy, handle_admin_ngreet,
     handle_admin_nhostile, handle_admin_ninfo, handle_admin_nlist, handle_admin_nname,
-    handle_admin_npatrol,
+    handle_admin_npassive, handle_admin_npatrol,
 };
 pub(super) use quests::{
     handle_admin_qgive, handle_admin_qinfo, handle_admin_qlist, handle_admin_qreset,

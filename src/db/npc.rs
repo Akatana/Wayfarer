@@ -34,7 +34,9 @@ pub async fn load_all(db: &DatabaseConnection) -> Result<Vec<NpcData>, DbErr> {
     let npc_rows = db
         .query_all(Statement::from_string(
             DbBackend::Sqlite,
-            "SELECT id, name, description, greeting, hostile, room_id FROM npcs ORDER BY id"
+            "SELECT id, name, description, greeting, hostile, passive, room_id, \
+             max_hp, min_damage, max_damage, attack_ticks, xp_reward \
+             FROM npcs ORDER BY id"
                 .to_string(),
         ))
         .await?;
@@ -60,7 +62,13 @@ pub async fn load_all(db: &DatabaseConnection) -> Result<Vec<NpcData>, DbErr> {
         let description: String = row.try_get("", "description")?;
         let greeting: Option<String> = row.try_get("", "greeting")?;
         let hostile: i64 = row.try_get("", "hostile")?;
+        let passive: i64 = row.try_get("", "passive")?;
         let room_id: i64 = row.try_get("", "room_id")?;
+        let max_hp: i64 = row.try_get("", "max_hp")?;
+        let min_damage: i64 = row.try_get("", "min_damage")?;
+        let max_damage: i64 = row.try_get("", "max_damage")?;
+        let attack_ticks: i64 = row.try_get("", "attack_ticks")?;
+        let xp_reward: i64 = row.try_get("", "xp_reward")?;
         let patrol = patrol_map.remove(&id).unwrap_or_default();
         result.push(NpcData {
             id,
@@ -68,8 +76,14 @@ pub async fn load_all(db: &DatabaseConnection) -> Result<Vec<NpcData>, DbErr> {
             description,
             greeting,
             hostile: hostile != 0,
+            passive: passive != 0,
             room_id: room_id as u64,
             patrol,
+            max_hp: max_hp as i32,
+            min_damage: min_damage as i32,
+            max_damage: max_damage as i32,
+            attack_ticks: attack_ticks as u64,
+            xp_reward: xp_reward as i32,
         });
     }
     Ok(result)
@@ -81,15 +95,23 @@ pub async fn load_all(db: &DatabaseConnection) -> Result<Vec<NpcData>, DbErr> {
 pub async fn create(db: &DatabaseConnection, npc: &NpcData) -> Result<(), DbErr> {
     db.execute(Statement::from_sql_and_values(
         DbBackend::Sqlite,
-        "INSERT OR IGNORE INTO npcs (id, name, description, greeting, hostile, room_id)
-         VALUES (?,?,?,?,?,?)",
+        "INSERT OR IGNORE INTO npcs \
+         (id, name, description, greeting, hostile, passive, room_id, \
+          max_hp, min_damage, max_damage, attack_ticks, xp_reward)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             npc.id.into(),
             npc.name.clone().into(),
             npc.description.clone().into(),
             npc.greeting.clone().into(),
             (npc.hostile as i64).into(),
+            (npc.passive as i64).into(),
             (npc.room_id as i64).into(),
+            (npc.max_hp as i64).into(),
+            (npc.min_damage as i64).into(),
+            (npc.max_damage as i64).into(),
+            (npc.attack_ticks as i64).into(),
+            (npc.xp_reward as i64).into(),
         ],
     ))
     .await?;
@@ -176,6 +198,16 @@ pub async fn update_hostile(db: &DatabaseConnection, id: i64, hostile: bool) -> 
     Ok(())
 }
 
+pub async fn update_passive(db: &DatabaseConnection, id: i64, passive: bool) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "UPDATE npcs SET passive=? WHERE id=?",
+        [(passive as i64).into(), id.into()],
+    ))
+    .await?;
+    Ok(())
+}
+
 /// Persists the room an NPC moved into during a patrol step.
 pub async fn update_room(db: &DatabaseConnection, npc_id: i64, room_id: u64) -> Result<(), DbErr> {
     db.execute(Statement::from_sql_and_values(
@@ -226,8 +258,14 @@ mod tests {
             description: "A test NPC.".to_string(),
             greeting: None,
             hostile: false,
+            passive: false,
             room_id: 1,
             patrol: Vec::new(),
+            max_hp: 20,
+            min_damage: 1,
+            max_damage: 4,
+            attack_ticks: 10,
+            xp_reward: 10,
         }
     }
 

@@ -68,6 +68,8 @@ pub fn parse(input: &str) -> Command {
         "@roominfo" => Command::AdminRoomInfo,
         "@mitem" if !rest.is_empty() => Command::AdminMitem(rest.to_string()),
         "@destroy" if !rest.is_empty() => Command::AdminDestroy(rest.to_string()),
+        "kill" | "attack" | "k" | "hit" if !rest.is_empty() => Command::Attack(rest.to_string()),
+        "flee" | "fl" | "run" => Command::Flee,
         "talk" if !rest.is_empty() => Command::Talk(rest.to_string()),
         "@mnpc" if !rest.is_empty() => Command::AdminMnpc(rest.to_string()),
         "@ndestroy" if !rest.is_empty() => Command::AdminNdestroy(rest.to_string()),
@@ -77,7 +79,14 @@ pub fn parse(input: &str) -> Command {
             .map(Command::AdminNinfo)
             .unwrap_or(Command::Unknown(input.to_string())),
         "balance" | "money" | "gold" | "wallet" => Command::Balance,
-        "quests" | "ql" => Command::QuestLog,
+        "quests" | "quest" | "ql" => Command::QuestLog,
+        "help" | "h" | "?" => {
+            if rest.is_empty() {
+                Command::Help(None)
+            } else {
+                Command::Help(Some(rest.to_string()))
+            }
+        }
         "@qlist" => Command::AdminQlist,
         "@qinfo" => rest
             .parse::<i64>()
@@ -96,7 +105,7 @@ pub fn parse(input: &str) -> Command {
                 _ => Command::Unknown(input.to_string()),
             }
         }
-        "@nname" | "@ndesc" | "@ngreet" | "@nhostile" | "@npatrol" => {
+        "@nname" | "@ndesc" | "@ngreet" | "@nhostile" | "@npassive" | "@npatrol" => {
             let (id_str, payload) = rest.split_once(' ').unwrap_or((rest, ""));
             match id_str.parse::<i64>() {
                 Ok(id) if !payload.is_empty() => match &verb[1..] {
@@ -106,6 +115,11 @@ pub fn parse(input: &str) -> Command {
                     "nhostile" => match payload.to_lowercase().as_str() {
                         "true" | "yes" | "1" => Command::AdminNhostile(id, true),
                         "false" | "no" | "0" => Command::AdminNhostile(id, false),
+                        _ => Command::Unknown(input.to_string()),
+                    },
+                    "npassive" => match payload.to_lowercase().as_str() {
+                        "true" | "yes" | "1" => Command::AdminNpassive(id, true),
+                        "false" | "no" | "0" => Command::AdminNpassive(id, false),
                         _ => Command::Unknown(input.to_string()),
                     },
                     "npatrol" => Command::AdminNpatrol(id, payload.to_string()),
@@ -133,6 +147,9 @@ pub fn parse(input: &str) -> Command {
                 },
                 _ => Command::Unknown(input.to_string()),
             }
+        }
+        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
+            Command::DialogueChoice(verb.parse::<usize>().unwrap())
         }
         _ => Command::Unknown(input.to_string()),
     }

@@ -13,7 +13,7 @@
           { "type": "reach", "room_id": 4, "description": "Reach the Western Crossroads" }
         ],
         "completion_npc_id": 1,
-        "completion_text": "Good work. The roads seem clear for now. But one more thing...",
+        "completion_text": "",
         "xp_reward": 50,
         "lp_reward": 2
       },
@@ -23,7 +23,7 @@
           { "type": "talk", "npc_id": 2, "description": "Speak with the hooded wanderer" }
         ],
         "completion_npc_id": 1,
-        "completion_text": "Interesting. I'll keep an eye on that one. You've done well, citizen.",
+        "completion_text": "",
         "xp_reward": 100,
         "lp_reward": 5,
         "copper_reward": 5000,
@@ -44,7 +44,7 @@
           { "type": "talk", "npc_id": 2, "description": "Ask the hooded wanderer about the coins" }
         ],
         "completion_npc_id": 2,
-        "completion_text": "Ah, you found one of my coins. Keep it — you've earned it. The less said about where it came from, the better.",
+        "completion_text": "",
         "xp_reward": 75
       }
     ]

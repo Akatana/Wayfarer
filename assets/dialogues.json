@@ -1,0 +1,190 @@
+[
+  {
+    "npc_id": 1,
+    "nodes": [
+      {
+        "id": "root",
+        "text": "Halt! State your business, traveler.",
+        "options": [
+          {
+            "text": "I'm looking for work.",
+            "goto": "quest_offer",
+            "conditions": [{ "type": "quest_not_started", "quest_id": 1 }]
+          },
+          {
+            "text": "I've scouted the roads as you asked.",
+            "goto": "turn_in_phase1",
+            "conditions": [{ "type": "quest_ready_at_phase", "quest_id": 1, "phase": 0 }],
+            "effects": [{ "type": "turn_in_quest" }]
+          },
+          {
+            "text": "I spoke with the hooded figure.",
+            "goto": "turn_in_phase2",
+            "conditions": [{ "type": "quest_ready_at_phase", "quest_id": 1, "phase": 1 }],
+            "effects": [{ "type": "turn_in_quest" }]
+          },
+          {
+            "text": "How are things around here?",
+            "goto": "small_talk"
+          },
+          {
+            "text": "Goodbye.",
+            "goto": null
+          }
+        ]
+      },
+      {
+        "id": "quest_offer",
+        "text": "The roads north and west of town have had suspicious activity lately. I need someone to scout them and report back. Interested?",
+        "options": [
+          {
+            "text": "I'll do it.",
+            "goto": "quest_accepted",
+            "effects": [{ "type": "accept_quest", "quest_id": 1 }]
+          },
+          {
+            "text": "Not right now.",
+            "goto": "root"
+          }
+        ]
+      },
+      {
+        "id": "quest_accepted",
+        "text": "Good. Check the Northern Gate and the Western Crossroads. Report back when you're done.",
+        "options": [
+          {
+            "text": "I'll get right on it.",
+            "goto": null
+          }
+        ]
+      },
+      {
+        "id": "turn_in_phase1",
+        "text": "Well done. The roads seem clear for now. But there's a hooded figure lingering near the Northern Gate — I want to know who they are. Speak with them.",
+        "options": [
+          {
+            "text": "I'll find them.",
+            "goto": null
+          }
+        ]
+      },
+      {
+        "id": "turn_in_phase2",
+        "text": "Interesting. I'll keep an eye on that one. You've done well today, citizen. Here — take this as thanks.",
+        "options": [
+          {
+            "text": "Thank you.",
+            "goto": null
+          }
+        ]
+      },
+      {
+        "id": "small_talk",
+        "text": "Quiet enough for now. But stay alert — strange travelers have been passing through lately.",
+        "options": [
+          {
+            "text": "Anything I should worry about?",
+            "goto": "quest_offer",
+            "conditions": [{ "type": "quest_not_started", "quest_id": 1 }]
+          },
+          {
+            "text": "I'll keep my eyes open.",
+            "goto": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "npc_id": 2,
+    "nodes": [
+      {
+        "id": "root",
+        "text": "...You've noticed me. Not many do.",
+        "options": [
+          {
+            "text": "The guard sent me to ask about you.",
+            "goto": "about_guard",
+            "conditions": [{ "type": "quest_phase", "quest_id": 1, "phase": 1 }],
+            "effects": [{ "type": "mark_objective", "quest_id": 1 }]
+          },
+          {
+            "text": "I found an unusual coin. Do you know anything about it?",
+            "goto": "coin_inquiry",
+            "conditions": [{ "type": "quest_active", "quest_id": 2 }],
+            "effects": [
+              { "type": "mark_objective", "quest_id": 2 },
+              { "type": "turn_in_quest" }
+            ]
+          },
+          {
+            "text": "Who are you?",
+            "goto": "identity"
+          },
+          {
+            "text": "Never mind.",
+            "goto": null
+          }
+        ]
+      },
+      {
+        "id": "about_guard",
+        "text": "Ah. The guard is cautious. That is wise in times like these. Tell him I mean no trouble — I'm simply watching.",
+        "options": [
+          {
+            "text": "Watching for what?",
+            "goto": "watching_for"
+          },
+          {
+            "text": "I'll pass that along.",
+            "goto": null
+          }
+        ]
+      },
+      {
+        "id": "watching_for",
+        "text": "For the same things everyone with sense watches for. You'll understand in time.",
+        "options": [
+          {
+            "text": "Very well.",
+            "goto": null
+          }
+        ]
+      },
+      {
+        "id": "coin_inquiry",
+        "text": "Ah, you found one of my coins. Keep it — you've earned it. The less said about where it came from, the better.",
+        "options": [
+          {
+            "text": "Understood.",
+            "goto": null
+          }
+        ]
+      },
+      {
+        "id": "identity",
+        "text": "A traveler. Like yourself.",
+        "options": [
+          {
+            "text": "That's not much of an answer.",
+            "goto": "identity_press"
+          },
+          {
+            "text": "Fair enough.",
+            "goto": null
+          }
+        ]
+      },
+      {
+        "id": "identity_press",
+        "text": "No. But it's the one I'm giving.",
+        "options": [
+          {
+            "text": "Suit yourself.",
+            "goto": null
+          }
+        ]
+      }
+    ]
+  }
+]

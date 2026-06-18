@@ -102,13 +102,25 @@ fn npc_spawned_in_world_triggers_after_interval_ticks() {
     for _ in 0..NPC_ROUTINE_INTERVAL_TICKS - 1 {
         state.advance_tick();
     }
-    npc_routine_system(&mut state.world, state.current_tick, &mut Vec::new());
+    npc_routine_system(
+        &mut state.world,
+        state.current_tick,
+        &mut Vec::new(),
+        &OutputRegistry::new(),
+        &wayfarer::world::room::RoomRegistry::new(),
+    );
     for (_, r) in state.world.query_mut::<&NpcRoutine>() {
         assert_eq!(r.last_action_tick, 0, "Should not have fired yet");
     }
 
     state.advance_tick();
-    npc_routine_system(&mut state.world, state.current_tick, &mut Vec::new());
+    npc_routine_system(
+        &mut state.world,
+        state.current_tick,
+        &mut Vec::new(),
+        &OutputRegistry::new(),
+        &wayfarer::world::room::RoomRegistry::new(),
+    );
     for (_, r) in state.world.query_mut::<&NpcRoutine>() {
         assert_eq!(r.last_action_tick, NPC_ROUTINE_INTERVAL_TICKS);
     }
@@ -132,6 +144,8 @@ fn ten_npcs_all_trigger_at_the_interval() {
         &mut state.world,
         NPC_ROUTINE_INTERVAL_TICKS,
         &mut Vec::new(),
+        &OutputRegistry::new(),
+        &wayfarer::world::room::RoomRegistry::new(),
     );
 
     for e in entities {
