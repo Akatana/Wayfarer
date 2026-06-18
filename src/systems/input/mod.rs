@@ -12,12 +12,12 @@ use crate::components::{
     BagCapacity, CharacterId, Equipped, InDialogue, InInventory, ItemId, ItemName, Name, NpcId,
     PlayerQuests, Position, RoomContents, Stats, TwoHanded,
 };
-use crate::systems::quest::{quest_mark_objective, quest_turn_in};
 use crate::dialogue::{DialogueCondition, DialogueEffect};
 use crate::game_state::GameState;
 use crate::item::{EquipSlot, ItemLocation, ItemLocationSave};
 use crate::quest::{PlayerQuestState, QuestDef, QuestObjectiveDef, QuestSave, QuestStatus};
 use crate::systems::output::{send_to_client, OutputRegistry};
+use crate::systems::quest::{quest_mark_objective, quest_turn_in};
 
 const BASE_INVENTORY_LIMIT: usize = 20;
 
@@ -145,6 +145,8 @@ fn dispatch(state: &mut GameState, input: PlayerInput, registry: &OutputRegistry
         Command::AdminIreq(item_id, stat, val) => {
             admin::handle_admin_ireq(state, id, item_id, stat, val, registry)
         }
+        Command::AdminIspawn(def_id) => admin::handle_admin_ispawn(state, id, def_id, registry),
+        Command::AdminIdefs => admin::handle_admin_idefs(state, id, registry),
         Command::AdminMnpc(spec) => admin::handle_admin_mnpc(state, id, spec, registry),
         Command::AdminNdestroy(target) => {
             admin::handle_admin_ndestroy(state, id, &target, registry)

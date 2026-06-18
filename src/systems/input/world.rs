@@ -4,14 +4,16 @@ use crate::components::{
     CharacterId, ClientConnection, Equipped, InInventory, ItemDescription, ItemId, ItemName, Name,
     NpcDescription, PlayerQuests, Position, Stats, Wallet,
 };
-use crate::systems::queries::{clients_in_room_except, find_item_in_inventory, find_item_in_room, find_npc_in_room};
-use crate::systems::quest::{quest_accept_from_item, quest_mark_objective};
 use crate::game_state::GameState;
 use crate::help::{find_entry, CATEGORIES, HELP_ENTRIES};
 use crate::item::{ItemLocation, ItemLocationSave};
 use crate::quest::QuestStatus;
 use crate::systems::combat::clear_combat;
 use crate::systems::output::{send_to_client, OutputRegistry};
+use crate::systems::queries::{
+    clients_in_room_except, find_item_in_inventory, find_item_in_room, find_npc_in_room,
+};
+use crate::systems::quest::{quest_accept_from_item, quest_mark_objective};
 
 pub(super) fn handle_connect(
     state: &mut GameState,
@@ -112,7 +114,9 @@ pub(super) fn handle_examine(
         .or_else(|| {
             let mut q = state.world.query::<(&ItemName, &Equipped)>();
             q.iter()
-                .find(|(_, (n, eq))| eq.owner == entity && n.0.to_lowercase().contains(&target_lower))
+                .find(|(_, (n, eq))| {
+                    eq.owner == entity && n.0.to_lowercase().contains(&target_lower)
+                })
                 .map(|(e, _)| e)
         });
 
@@ -184,7 +188,8 @@ pub(super) fn handle_score(state: &GameState, client_id: ClientId, registry: &Ou
         .unwrap_or_default();
     let is_admin = state.is_admin(entity);
     let room_name = {
-        state.get_player_room(entity)
+        state
+            .get_player_room(entity)
             .and_then(|id| state.room_registry.get(id))
             .map(|r| r.name.clone())
             .unwrap_or_else(|| "Unknown".to_string())

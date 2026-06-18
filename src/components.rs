@@ -167,6 +167,9 @@ pub struct Wallet(pub i64);
 
 // ── Combat components ─────────────────────────────────────────────────────────
 
+/// Items this NPC may drop on death, loaded from the NPC definition.
+pub struct NpcLootTable(pub Vec<crate::npc::LootEntry>);
+
 /// Runtime health and combat stats for an NPC entity.
 /// Players use the `Stats` component instead.
 pub struct NpcCombatStats {

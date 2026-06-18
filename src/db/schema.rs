@@ -44,6 +44,7 @@ pub async fn create_tables(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr
 
     // Additive migrations — fail silently on fresh DBs that already have the column.
     for sql in [
+        "ALTER TABLE items ADD COLUMN def_id       INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE npcs ADD COLUMN max_hp       INTEGER NOT NULL DEFAULT 20",
         "ALTER TABLE npcs ADD COLUMN min_damage   INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE npcs ADD COLUMN max_damage   INTEGER NOT NULL DEFAULT 4",
@@ -68,6 +69,7 @@ pub async fn create_tables(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr
         DbBackend::Sqlite,
         "CREATE TABLE IF NOT EXISTS items (
             id              INTEGER PRIMARY KEY,
+            def_id          INTEGER NOT NULL DEFAULT 0,
             name            TEXT    NOT NULL,
             description     TEXT    NOT NULL,
             equip_slot      TEXT,
@@ -114,6 +116,38 @@ pub async fn create_tables(db: &DatabaseConnection) -> Result<(), sea_orm::DbErr
             room_id INTEGER NOT NULL,
             PRIMARY KEY (npc_id, step),
             FOREIGN KEY (npc_id) REFERENCES npcs(id)
+        )"
+        .to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        "CREATE TABLE IF NOT EXISTS npc_loot_table (
+            npc_id  INTEGER NOT NULL,
+            step    INTEGER NOT NULL,
+            item_id INTEGER NOT NULL,
+            chance  REAL    NOT NULL DEFAULT 1.0,
+            PRIMARY KEY (npc_id, step),
+            FOREIGN KEY (npc_id) REFERENCES npcs(id)
+        )"
+        .to_string(),
+    ))
+    .await?;
+
+    db.execute(Statement::from_string(
+        DbBackend::Sqlite,
+        "CREATE TABLE IF NOT EXISTS item_definitions (
+            id            INTEGER PRIMARY KEY,
+            name          TEXT    NOT NULL,
+            description   TEXT    NOT NULL DEFAULT '',
+            equip_slot    TEXT,
+            two_handed    INTEGER NOT NULL DEFAULT 0,
+            bag_capacity  INTEGER,
+            req_level     INTEGER NOT NULL DEFAULT 0,
+            req_strength  INTEGER NOT NULL DEFAULT 0,
+            req_dexterity INTEGER NOT NULL DEFAULT 0,
+            req_knowledge INTEGER NOT NULL DEFAULT 0
         )"
         .to_string(),
     ))

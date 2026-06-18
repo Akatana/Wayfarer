@@ -61,10 +61,13 @@ impl ItemLocation {
     }
 }
 
-/// Full runtime description of an item, loaded from DB.
+/// Full runtime description of an item instance, loaded from DB.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemData {
+    /// Unique instance id — the DB primary key for this specific copy.
     pub id: i64,
+    /// Template id from `items.json`. Multiple instances can share the same def_id.
+    pub def_id: i64,
     pub name: String,
     pub description: String,
     pub equip_slot: Option<EquipSlot>,

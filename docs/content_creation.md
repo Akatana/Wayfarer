@@ -24,13 +24,18 @@ Wayfarer operates on a dual-persistence model:
 * **Admin Commands:** Authorized administrators can modify the live world in real time. Many in-game commands have a persistent effect, saving changes directly back to the database.
 
 > [!WARNING]
-> Changing static JSON asset definitions (like `assets/items.json`) after the server has already booted and populated the database may not automatically update existing rows in `wayfarer.db`. If you make sweeping changes to static files, you may need to clear the database file to force a re-seed.
+> Static JSON files (`assets/items.json`, `assets/npcs.json`, etc.) are only read on first boot when the relevant database table is empty. Changes made after the server has seeded the database will not be reflected automatically. To apply sweeping changes to static definitions, delete `wayfarer.db` to force a full re-seed. Alternatively, use the in-game `@i*` admin commands to update definitions without wiping the database.
 
 ---
 
 ## 1. Items (`assets/items.json`)
 
-Items define the equipment, currency, and quest objects in the world. They are represented as a JSON array of item templates.
+Items use a **definition / instance** model, similar to WoW-style itemisation:
+
+- **Definitions** (templates) live in `assets/items.json` and are seeded into the `item_definitions` database table on first boot. Each definition has a stable `id` used across rooms, quests, and loot tables.
+- **Instances** are physical copies of a definition — one is created for each room placement listed in room JSON files, and more are created whenever an NPC drops loot or an admin uses `@ispawn`. Multiple players can each carry their own copy of the same item type.
+
+`assets/items.json` defines the templates. Room JSON files reference them by `id` to place starting instances in the world.
 
 ### Item JSON Schema
 
@@ -72,13 +77,17 @@ When specifying `equip_slot`, use one of the following exact string keys:
 ```
 
 ### In-Game Admin Commands for Items
-Administrators can spawn, destroy, or edit items dynamically:
-* `@mitem <name> [/ <description>]` — Spawns a new item template in the current room and returns its database ID.
-* `@destroy <name>` — Permanently deletes a floor item matching the name in the current room.
-* `@iname <id> <name>` — Renames an item template by ID.
-* `@idesc <id> <description>` — Changes an item's description.
-* `@islot <id> <slot>` — Sets the item's equipment slot (or `none`).
-* `@ireq <id> <stat> <value>` — Sets a stat requirement (`str`, `dex`, `knw`, `level`). Set value to `0` to clear.
+Administrators can define new item types and spawn instances at runtime:
+* `@idefs` — Lists all loaded item definitions (both from `items.json` and admin-created), showing their `def_id`, name, and equip slot.
+* `@mitem <name> [/ <description>]` — Creates a new item definition and immediately spawns one instance in the current room. Returns both the `def_id` and the instance `id`.
+* `@ispawn <def_id>` — Spawns a new instance of an existing definition in the current room. Use after `@iname`/`@islot`/`@ireq` to place updated copies.
+* `@destroy <name>` — Permanently destroys a named item instance on the floor of the current room.
+* `@iname <def_id> <name>` — Renames a definition by its `def_id`. Future `@ispawn` calls will use the new name.
+* `@idesc <def_id> <description>` — Updates a definition's description.
+* `@islot <def_id> <slot>` — Sets the definition's equip slot (or `none` to clear).
+* `@ireq <def_id> <stat> <value>` — Sets a stat requirement on the definition (`str`, `dex`, `knw`, `level`). Set to `0` to clear.
+
+> All `@i*` edit commands target a **definition id** (`def_id`), not an instance. Use `@idefs` to look up ids.
 
 ---
 

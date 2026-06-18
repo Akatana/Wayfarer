@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 
 use crate::components::{
-    ClientConnection, Hostile, InCombat, Name, NpcCombatStats, NpcId, Passive, Position, Stats,
+    BagCapacity, ClientConnection, Hostile, InCombat, ItemDescription, ItemId, ItemName, ItemSlot,
+    Name, NpcCombatStats, NpcId, NpcLootTable, Passive, Position, RoomContents, Stats, TwoHanded,
 };
-use crate::game_state::GameState;
+use crate::game_state::{AdminDbOp, GameState};
+use crate::item::{ItemData, ItemLocation};
 use crate::npc::NpcRespawn;
 use crate::systems::output::{send_to_client, OutputRegistry};
 use crate::world::seed::{spawn_single_npc, STARTING_ROOM_ID};
@@ -14,6 +16,20 @@ pub const NPC_RESPAWN_TICKS: u64 = 300;
 /// Player attack interval formula: base 10 ticks, reduced by DEX/5, minimum 3.
 pub fn player_attack_interval(dexterity: i32) -> u64 {
     10u64.saturating_sub((dexterity / 5) as u64).max(3)
+}
+
+/// Returns `true` with probability `chance` (0.0–1.0) using a lightweight LCG.
+fn roll_chance(seed: u64, chance: f32) -> bool {
+    if chance >= 1.0 {
+        return true;
+    }
+    if chance <= 0.0 {
+        return false;
+    }
+    let h = seed
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1_442_695_040_888_963_407);
+    (h >> 32) % 10_000 < (chance * 10_000.0) as u64
 }
 
 /// Deterministic pseudo-random value in `[min, max)` using a lightweight LCG.
@@ -195,6 +211,14 @@ pub fn combat_system(state: &mut GameState, registry: &OutputRegistry) {
                 .ok()
                 .map(|p| p.room_id);
 
+            // Collect loot entries before the entity is despawned.
+            let loot: Vec<crate::npc::LootEntry> = state
+                .world
+                .get::<&NpcLootTable>(dead_entity)
+                .ok()
+                .map(|lt| lt.0.clone())
+                .unwrap_or_default();
+
             // Award XP and notify the killer.
             if let Ok(mut stats) = state.world.get::<&mut Stats>(killer) {
                 let levels = stats.add_experience(xp);
@@ -249,8 +273,6 @@ pub fn combat_system(state: &mut GameState, registry: &OutputRegistry) {
 
             // Queue respawn.
             if let Some(npc_id) = state.world.get::<&NpcId>(dead_entity).ok().map(|n| n.0) {
-                // Find the original NpcData from another query — we only have the
-                // component data, so reconstruct a minimal NpcData for respawn.
                 let npc_data = build_respawn_data(&state.world, dead_entity, npc_id);
                 state.pending_respawns.push(NpcRespawn {
                     data: npc_data,
@@ -259,6 +281,71 @@ pub fn combat_system(state: &mut GameState, registry: &OutputRegistry) {
             }
 
             state.world.despawn(dead_entity).ok();
+
+            // Spawn loot copies in the kill room.
+            if let Some(rid) = room_id {
+                for (i, entry) in loot.iter().enumerate() {
+                    let loot_seed = tick
+                        ^ u64::from(dead_entity.to_bits())
+                        ^ (i as u64).wrapping_mul(2_654_435_761);
+                    if !roll_chance(loot_seed, entry.chance) {
+                        continue;
+                    }
+                    let Some(tmpl) = state.item_templates.get(&entry.item_id).cloned() else {
+                        continue;
+                    };
+                    let instance_id = state.next_item_id;
+                    state.next_item_id += 1;
+                    let equip_slot = tmpl
+                        .equip_slot
+                        .as_deref()
+                        .and_then(crate::item::EquipSlot::parse);
+                    let item_data = ItemData {
+                        id: instance_id,
+                        def_id: entry.item_id,
+                        name: tmpl.name.clone(),
+                        description: tmpl.description.clone(),
+                        equip_slot,
+                        two_handed: tmpl.two_handed,
+                        bag_capacity: tmpl.bag_capacity,
+                        requirements: tmpl.requirements,
+                        location: ItemLocation::Room(rid),
+                    };
+                    let mut builder = hecs::EntityBuilder::new();
+                    builder.add(ItemId(instance_id));
+                    builder.add(ItemName(tmpl.name.clone()));
+                    builder.add(ItemDescription(tmpl.description.clone()));
+                    builder.add(RoomContents { room_id: rid });
+                    if let Some(slot) = equip_slot {
+                        builder.add(ItemSlot(slot));
+                    }
+                    if tmpl.two_handed {
+                        builder.add(TwoHanded);
+                    }
+                    if let Some(cap) = tmpl.bag_capacity {
+                        builder.add(BagCapacity(cap));
+                    }
+                    if tmpl.requirements.has_any() {
+                        builder.add(tmpl.requirements);
+                    }
+                    state.world.spawn(builder.build());
+                    state
+                        .pending_admin_ops
+                        .push(AdminDbOp::CreateItem(item_data));
+
+                    let drop_msg = format!("{} falls to the ground.", capitalize_first(&tmpl.name));
+                    let players_in_room: Vec<u64> = {
+                        let mut q = state.world.query::<(&Position, &ClientConnection)>();
+                        q.iter()
+                            .filter(|(_, (p, _))| p.room_id == rid)
+                            .map(|(_, (_, conn))| conn.client_id)
+                            .collect()
+                    };
+                    for cid in players_in_room {
+                        send_to_client(registry, cid, drop_msg.clone());
+                    }
+                }
+            }
         } else {
             // Player died.
             let npc_name = state
@@ -478,6 +565,11 @@ fn build_respawn_data(
             )
         })
         .unwrap_or((20, 1, 4, 10, 10));
+    let loot_table = world
+        .get::<&NpcLootTable>(entity)
+        .ok()
+        .map(|lt| lt.0.clone())
+        .unwrap_or_default();
 
     crate::npc::NpcData {
         id: npc_id,
@@ -493,6 +585,7 @@ fn build_respawn_data(
         max_damage,
         attack_ticks,
         xp_reward,
+        loot_table,
     }
 }
 

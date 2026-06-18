@@ -1,5 +1,7 @@
 use crate::command::ClientId;
-use crate::components::{CharacterId, Equipped, InInventory, ItemName, ItemSlot, Name, RoomContents, Stats, TwoHanded};
+use crate::components::{
+    CharacterId, Equipped, InInventory, ItemName, ItemSlot, Name, RoomContents, Stats, TwoHanded,
+};
 use crate::game_state::GameState;
 use crate::item::{EquipRequirements, EquipSlot, ItemLocation, ItemLocationSave};
 use crate::systems::output::{send_to_client, OutputRegistry};

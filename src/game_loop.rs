@@ -34,9 +34,19 @@ pub async fn run(
         std::path::Path::new("assets/rooms"),
         std::path::Path::new("assets/items.json"),
     );
+    crate::db::item::seed_defs_if_empty(&db, &seed.item_defs)
+        .await
+        .expect("[GameLoop] Failed to seed item definitions");
     crate::db::item::seed_if_empty(&db, &seed.item_defs, &seed.room_items)
         .await
         .expect("[GameLoop] Failed to seed items");
+    let item_templates: std::collections::HashMap<i64, crate::world::loader::ItemDef> =
+        crate::db::item::load_all_defs(&db)
+            .await
+            .expect("[GameLoop] Failed to load item definitions")
+            .into_iter()
+            .map(|d| (d.id, d))
+            .collect();
     let room_items = crate::db::item::load_in_rooms(&db)
         .await
         .expect("[GameLoop] Failed to load room items");
@@ -47,6 +57,9 @@ pub async fn run(
     let max_item_id = crate::db::item::max_id(&db)
         .await
         .expect("[GameLoop] Failed to fetch max item id");
+    let max_def_id = crate::db::item::max_def_id(&db)
+        .await
+        .expect("[GameLoop] Failed to fetch max def id");
 
     // Load NPCs: seed DB on first boot, then spawn into ECS.
     let npc_seed = crate::world::loader::load_npcs(std::path::Path::new("assets/npcs.json"));
@@ -82,8 +95,10 @@ pub async fn run(
     state.next_room_id = max_room_id + 1;
     state.next_item_id = max_item_id + 1;
     state.next_npc_id = max_npc_id + 1;
+    state.next_def_id = max_def_id + 1;
     state.quest_defs = quest_defs;
     state.dialogue_defs = dialogue_defs;
+    state.item_templates = item_templates;
     crate::world::seed::spawn_items(&mut state.world, &room_items);
     crate::world::seed::spawn_npcs(&mut state.world, &npcs);
 
@@ -170,25 +185,26 @@ pub async fn run(
                     AdminDbOp::DeleteExit { room_id, dir } => {
                         crate::db::room::delete_exit(&db, room_id, dir).await
                     }
+                    AdminDbOp::CreateItemDef(def) => crate::db::item::create_def(&db, &def).await,
                     AdminDbOp::CreateItem(item) => crate::db::item::create(&db, &item).await,
                     AdminDbOp::DeleteItem(id) => crate::db::item::delete(&db, id).await,
-                    AdminDbOp::UpdateItemName { id, name } => {
-                        crate::db::item::update_name(&db, id, &name).await
+                    AdminDbOp::UpdateDefName { id, name } => {
+                        crate::db::item::update_def_name(&db, id, &name).await
                     }
-                    AdminDbOp::UpdateItemDesc { id, description } => {
-                        crate::db::item::update_description(&db, id, &description).await
+                    AdminDbOp::UpdateDefDesc { id, description } => {
+                        crate::db::item::update_def_description(&db, id, &description).await
                     }
-                    AdminDbOp::UpdateItemSlot { id, equip_slot } => {
-                        crate::db::item::update_slot(&db, id, equip_slot.as_deref()).await
+                    AdminDbOp::UpdateDefSlot { id, equip_slot } => {
+                        crate::db::item::update_def_slot(&db, id, equip_slot.as_deref()).await
                     }
-                    AdminDbOp::UpdateItemReq {
+                    AdminDbOp::UpdateDefReq {
                         id,
                         level,
                         strength,
                         dexterity,
                         knowledge,
                     } => {
-                        crate::db::item::update_requirements(
+                        crate::db::item::update_def_requirements(
                             &db, id, level, strength, dexterity, knowledge,
                         )
                         .await

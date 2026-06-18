@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement};
 
-use crate::npc::NpcData;
+use crate::npc::{LootEntry, NpcData};
 
 // ── Seeding ───────────────────────────────────────────────────────────────────
 
@@ -18,6 +18,20 @@ pub async fn seed_if_empty(db: &DatabaseConnection, npcs: &[NpcData]) -> Result<
         .unwrap_or(0);
 
     if count > 0 {
+        // Seed loot tables even on existing DBs (handles adding loot to npcs.json after initial boot).
+        let loot_count: i64 = db
+            .query_one(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT COUNT(*) AS n FROM npc_loot_table".to_string(),
+            ))
+            .await?
+            .and_then(|r| r.try_get::<i64>("", "n").ok())
+            .unwrap_or(0);
+        if loot_count == 0 {
+            for npc in npcs.iter().filter(|n| !n.loot_table.is_empty()) {
+                set_loot_table(db, npc.id, &npc.loot_table).await?;
+            }
+        }
         return Ok(());
     }
 
@@ -55,6 +69,24 @@ pub async fn load_all(db: &DatabaseConnection) -> Result<Vec<NpcData>, DbErr> {
         patrol_map.entry(npc_id).or_default().push(room_id as u64);
     }
 
+    let loot_rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT npc_id, item_id, chance FROM npc_loot_table ORDER BY npc_id, step".to_string(),
+        ))
+        .await?;
+
+    let mut loot_map: HashMap<i64, Vec<LootEntry>> = HashMap::new();
+    for row in loot_rows {
+        let npc_id: i64 = row.try_get("", "npc_id")?;
+        let item_id: i64 = row.try_get("", "item_id")?;
+        let chance: f64 = row.try_get("", "chance")?;
+        loot_map.entry(npc_id).or_default().push(LootEntry {
+            item_id,
+            chance: chance as f32,
+        });
+    }
+
     let mut result = Vec::new();
     for row in npc_rows {
         let id: i64 = row.try_get("", "id")?;
@@ -70,6 +102,7 @@ pub async fn load_all(db: &DatabaseConnection) -> Result<Vec<NpcData>, DbErr> {
         let attack_ticks: i64 = row.try_get("", "attack_ticks")?;
         let xp_reward: i64 = row.try_get("", "xp_reward")?;
         let patrol = patrol_map.remove(&id).unwrap_or_default();
+        let loot_table = loot_map.remove(&id).unwrap_or_default();
         result.push(NpcData {
             id,
             name,
@@ -84,6 +117,7 @@ pub async fn load_all(db: &DatabaseConnection) -> Result<Vec<NpcData>, DbErr> {
             max_damage: max_damage as i32,
             attack_ticks: attack_ticks as u64,
             xp_reward: xp_reward as i32,
+            loot_table,
         });
     }
     Ok(result)
@@ -116,6 +150,7 @@ pub async fn create(db: &DatabaseConnection, npc: &NpcData) -> Result<(), DbErr>
     ))
     .await?;
     set_patrol(db, npc.id, &npc.patrol).await?;
+    set_loot_table(db, npc.id, &npc.loot_table).await?;
     Ok(())
 }
 
@@ -219,6 +254,34 @@ pub async fn update_room(db: &DatabaseConnection, npc_id: i64, room_id: u64) -> 
     Ok(())
 }
 
+/// Replaces the loot table for an NPC. Pass an empty slice to clear it.
+pub async fn set_loot_table(
+    db: &DatabaseConnection,
+    npc_id: i64,
+    entries: &[LootEntry],
+) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "DELETE FROM npc_loot_table WHERE npc_id=?",
+        [npc_id.into()],
+    ))
+    .await?;
+    for (step, entry) in entries.iter().enumerate() {
+        db.execute(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "INSERT INTO npc_loot_table (npc_id, step, item_id, chance) VALUES (?,?,?,?)",
+            [
+                npc_id.into(),
+                (step as i64).into(),
+                entry.item_id.into(),
+                (entry.chance as f64).into(),
+            ],
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
 /// Replaces the patrol route for an NPC. Pass an empty slice to clear it.
 pub async fn set_patrol(db: &DatabaseConnection, npc_id: i64, rooms: &[u64]) -> Result<(), DbErr> {
     db.execute(Statement::from_sql_and_values(
@@ -266,6 +329,7 @@ mod tests {
             max_damage: 4,
             attack_ticks: 10,
             xp_reward: 10,
+            loot_table: Vec::new(),
         }
     }
 

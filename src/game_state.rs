@@ -12,6 +12,7 @@ use crate::direction::Direction;
 use crate::item::{ItemData, ItemLocation, ItemLocationSave};
 use crate::npc::{NpcData, NpcRoomSave};
 use crate::quest::{QuestDef, QuestSave};
+use crate::world::loader::ItemDef;
 use crate::world::player_registry::PlayerRegistry;
 use crate::world::room::{Room, RoomRegistry};
 use crate::world::seed::build_starting_rooms;
@@ -34,22 +35,23 @@ pub enum AdminDbOp {
         room_id: u64,
         dir: Direction,
     },
+    CreateItemDef(crate::world::loader::ItemDef),
     CreateItem(ItemData),
     DeleteItem(i64),
-    UpdateItemName {
+    UpdateDefName {
         id: i64,
         name: String,
     },
-    UpdateItemDesc {
+    UpdateDefDesc {
         id: i64,
         description: String,
     },
-    /// `equip_slot` is the slot label string (e.g. "Left Hand"); `None` clears the slot.
-    UpdateItemSlot {
+    /// `equip_slot` is the raw slot string (e.g. "lefthand"); `None` clears the slot.
+    UpdateDefSlot {
         id: i64,
         equip_slot: Option<String>,
     },
-    UpdateItemReq {
+    UpdateDefReq {
         id: i64,
         level: i32,
         strength: i32,
@@ -109,6 +111,8 @@ pub struct GameState {
     pub next_item_id: i64,
     /// Next available id for admin-created NPCs. Set from DB max at startup.
     pub next_npc_id: i64,
+    /// Next available id for admin-created item definitions. Set from DB max at startup.
+    pub next_def_id: i64,
     /// All loaded quest definitions keyed by quest id. Immutable after startup.
     pub quest_defs: HashMap<i64, QuestDef>,
     /// All loaded NPC dialogue trees keyed by npc_db_id. Immutable after startup.
@@ -119,6 +123,8 @@ pub struct GameState {
     pub pending_commands: HashMap<ClientId, VecDeque<Command>>,
     /// NPCs scheduled to respawn. Checked every tick by the combat system.
     pub pending_respawns: Vec<crate::npc::NpcRespawn>,
+    /// Item definitions keyed by id, used by the combat system to spawn loot copies.
+    pub item_templates: HashMap<i64, ItemDef>,
 }
 
 impl GameState {
@@ -142,11 +148,13 @@ impl GameState {
             next_room_id: 1001,
             next_item_id: 1001,
             next_npc_id: 1001,
+            next_def_id: 1001,
             quest_defs: HashMap::new(),
             dialogue_defs: HashMap::new(),
             pending_quest_saves: Vec::new(),
             pending_commands: HashMap::new(),
             pending_respawns: Vec::new(),
+            item_templates: HashMap::new(),
         }
     }
 

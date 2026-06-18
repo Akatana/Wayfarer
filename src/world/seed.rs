@@ -1,7 +1,7 @@
 use crate::components::{
     BagCapacity, Hostile, ItemDescription, ItemId, ItemName, ItemSlot, Name, NpcCombatStats,
-    NpcDescription, NpcGreeting, NpcId, NpcRoutine, Passive, PatrolRoute, Position, RoomContents,
-    TwoHanded,
+    NpcDescription, NpcGreeting, NpcId, NpcLootTable, NpcRoutine, Passive, PatrolRoute, Position,
+    RoomContents, TwoHanded,
 };
 use crate::item::{ItemData, ItemLocation};
 use crate::npc::NpcData;
@@ -105,6 +105,9 @@ pub fn spawn_single_npc(world: &mut hecs::World, npc: &NpcData) {
             index,
         });
     }
+    if !npc.loot_table.is_empty() {
+        builder.add(NpcLootTable(npc.loot_table.clone()));
+    }
 
     world.spawn(builder.build());
 }
@@ -118,6 +121,7 @@ mod tests {
     fn make_item(id: i64, room_id: u64) -> ItemData {
         ItemData {
             id,
+            def_id: id,
             name: format!("item {id}"),
             description: "A test item.".to_string(),
             equip_slot: None,
@@ -202,6 +206,7 @@ mod tests {
     fn spawn_items_skips_non_room_items() {
         let item = ItemData {
             id: 1,
+            def_id: 1,
             name: "carried".to_string(),
             description: "In inventory.".to_string(),
             equip_slot: None,

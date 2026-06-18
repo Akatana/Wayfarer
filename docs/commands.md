@@ -120,23 +120,32 @@ Moving while in combat breaks combat automatically.
 
 ## Admin — Items
 
+Items use a **definition / instance** model. A *definition* is a reusable template (name, description, slot, requirements). An *instance* is a physical copy of a definition placed in a room, a player's inventory, or a loot drop. `@mitem` creates a definition and spawns one instance. `@ispawn` spawns additional instances of any existing definition.
+
 | Command | Description |
 |---|---|
-| `@mitem <name> [/ <description>]` | Create a new item in the current room. Returns the item's `#id`. Example: `@mitem a rusty key / A key caked in rust.` |
-| `@destroy <name>` | Permanently destroy a named item on the floor of the current room |
-| `@iname <id> <name>` | Rename an item by id |
-| `@idesc <id> <description>` | Set an item's description by id |
-| `@islot <id> <slot>` | Set an item's equip slot by id. Use any slot keyword from the table above, or `none` to make the item unequippable |
-| `@ireq <id> <stat> <value>` | Set one stat requirement on an item by id. `stat` must be one of `str`, `dex`, `knw`, `level`. Set to `0` to clear |
+| `@idefs` | List all item definitions with their ids, names, and equip slots |
+| `@mitem <name> [/ <description>]` | Create a new item definition and immediately spawn one instance in the current room. Prints both the `def_id` and the instance `id`. Example: `@mitem a rusty key / A key caked in rust.` |
+| `@ispawn <def_id>` | Spawn a new instance of an existing definition (by def_id) in the current room |
+| `@destroy <name>` | Permanently destroy a named item instance on the floor of the current room |
+| `@iname <def_id> <name>` | Rename a definition by def_id |
+| `@idesc <def_id> <description>` | Set a definition's description by def_id |
+| `@islot <def_id> <slot>` | Set a definition's equip slot by def_id. Use any slot keyword from the table above, or `none` to make the item unequippable |
+| `@ireq <def_id> <stat> <value>` | Set one stat requirement on a definition by def_id. `stat` must be one of `str`, `dex`, `knw`, `level`. Set to `0` to clear |
+
+> The `@i*` edit commands take a **def_id** (visible in `@idefs` or returned by `@mitem`), not an instance id.
 
 **Item editing example workflow:**
 ```
 @mitem a war axe / A heavy double-headed axe.
-→ [Admin] 'a war axe' (#1042) created in this room.
+→ [Admin] Definition #1001 'a war axe' created. Instance #1001 placed in this room.
 
-@islot 1042 lefthand
-@ireq 1042 str 10
-@ireq 1042 level 3
+@islot 1001 lefthand
+@ireq 1001 str 10
+@ireq 1001 level 3
+
+@ispawn 1001
+→ [Admin] Spawned 'a war axe' (def #1001) as instance #1002 in this room.
 ```
 
 ---

@@ -128,6 +128,12 @@ pub fn parse(input: &str) -> Command {
                 _ => Command::Unknown(input.to_string()),
             }
         }
+        "@ispawn" => rest
+            .trim()
+            .parse::<i64>()
+            .map(Command::AdminIspawn)
+            .unwrap_or(Command::Unknown(input.to_string())),
+        "@idefs" => Command::AdminIdefs,
         "@iname" | "@idesc" | "@islot" | "@ireq" => {
             // All item-edit commands share the format: @cmd <id> <payload>
             let (id_str, payload) = rest.split_once(' ').unwrap_or((rest, ""));
@@ -319,6 +325,14 @@ mod tests {
             Command::AdminDestroy("sword".to_string())
         );
         assert!(matches!(parse("@mitem"), Command::Unknown(_)));
+    }
+
+    #[test]
+    fn parses_admin_ispawn_and_idefs() {
+        assert_eq!(parse("@ispawn 7"), Command::AdminIspawn(7));
+        assert_eq!(parse("@idefs"), Command::AdminIdefs);
+        assert!(matches!(parse("@ispawn notanumber"), Command::Unknown(_)));
+        assert!(matches!(parse("@ispawn"), Command::Unknown(_)));
     }
 
     #[test]

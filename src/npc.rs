@@ -1,3 +1,17 @@
+/// One entry in an NPC's loot table.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct LootEntry {
+    /// Template item id — a copy of this item is spawned on drop.
+    pub item_id: i64,
+    /// Drop probability per kill (0.0 = never, 1.0 = always).
+    #[serde(default = "default_chance")]
+    pub chance: f32,
+}
+
+fn default_chance() -> f32 {
+    1.0
+}
+
 /// Persistent NPC record — matches the `npcs` DB schema and serves as the
 /// seed format (deserialized from `assets/npcs.json`).
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
@@ -28,6 +42,9 @@ pub struct NpcData {
     pub attack_ticks: u64,
     #[serde(default = "default_xp_reward")]
     pub xp_reward: i32,
+    /// Items that may drop when this NPC is killed.
+    #[serde(default)]
+    pub loot_table: Vec<LootEntry>,
 }
 
 fn default_max_hp() -> i32 {

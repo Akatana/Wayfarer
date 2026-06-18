@@ -5,12 +5,111 @@ use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement};
 use crate::item::{EquipRequirements, EquipSlot, ItemData, ItemLocation, ItemLocationSave};
 use crate::world::loader::ItemDef;
 
+// ── Item definition seeding / loading ────────────────────────────────────────
+
+/// Seeds the item_definitions table from `items.json` on first boot.
+pub async fn seed_defs_if_empty(
+    db: &DatabaseConnection,
+    item_defs: &[ItemDef],
+) -> Result<(), DbErr> {
+    let count: i64 = db
+        .query_one(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT COUNT(*) AS n FROM item_definitions".to_string(),
+        ))
+        .await?
+        .and_then(|r| r.try_get::<i64>("", "n").ok())
+        .unwrap_or(0);
+
+    if count > 0 {
+        return Ok(());
+    }
+
+    for def in item_defs {
+        db.execute(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "INSERT INTO item_definitions (
+                id, name, description, equip_slot, two_handed, bag_capacity,
+                req_level, req_strength, req_dexterity, req_knowledge
+             ) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [
+                def.id.into(),
+                def.name.clone().into(),
+                def.description.clone().into(),
+                def.equip_slot.clone().into(),
+                (def.two_handed as i64).into(),
+                def.bag_capacity.map(|c| c as i64).into(),
+                (def.requirements.level as i64).into(),
+                (def.requirements.strength as i64).into(),
+                (def.requirements.dexterity as i64).into(),
+                (def.requirements.knowledge as i64).into(),
+            ],
+        ))
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// Loads all item definitions from the DB (both built-in and admin-created).
+pub async fn load_all_defs(db: &DatabaseConnection) -> Result<Vec<ItemDef>, DbErr> {
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT * FROM item_definitions ORDER BY id".to_string(),
+        ))
+        .await?;
+
+    rows.into_iter().map(|r| row_to_item_def(&r)).collect()
+}
+
+/// Persists a new admin-created item definition.
+pub async fn create_def(db: &DatabaseConnection, def: &ItemDef) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "INSERT INTO item_definitions (
+            id, name, description, equip_slot, two_handed, bag_capacity,
+            req_level, req_strength, req_dexterity, req_knowledge
+         ) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        [
+            def.id.into(),
+            def.name.clone().into(),
+            def.description.clone().into(),
+            def.equip_slot.clone().into(),
+            (def.two_handed as i64).into(),
+            def.bag_capacity.map(|c| c as i64).into(),
+            (def.requirements.level as i64).into(),
+            (def.requirements.strength as i64).into(),
+            (def.requirements.dexterity as i64).into(),
+            (def.requirements.knowledge as i64).into(),
+        ],
+    ))
+    .await?;
+    Ok(())
+}
+
+/// Returns the highest id in item_definitions, or 0 if empty.
+pub async fn max_def_id(db: &DatabaseConnection) -> Result<i64, DbErr> {
+    let n: i64 = db
+        .query_one(Statement::from_string(
+            DbBackend::Sqlite,
+            "SELECT COALESCE(MAX(id), 0) AS n FROM item_definitions".to_string(),
+        ))
+        .await?
+        .and_then(|r| r.try_get::<i64>("", "n").ok())
+        .unwrap_or(0);
+    Ok(n)
+}
+
 // ── Seeding ───────────────────────────────────────────────────────────────────
 
 /// Seeds the items table on first boot.
 ///
-/// `item_defs` — parsed from `assets/items.json`
-/// `room_items` — room_id → [item_id, ...] from room JSON files
+/// Creates one instance per room placement. Items not placed in any room are
+/// not seeded — they only enter the world via loot drops or admin creation.
+///
+/// `item_defs` — parsed from `assets/items.json` (templates)
+/// `room_items` — room_id → [def_id, ...] from room JSON files
 pub async fn seed_if_empty(
     db: &DatabaseConnection,
     item_defs: &[ItemDef],
@@ -29,39 +128,37 @@ pub async fn seed_if_empty(
         return Ok(());
     }
 
-    // Build a map: item_id → starting room_id.
-    let mut item_room: HashMap<i64, u64> = HashMap::new();
-    for (&room_id, ids) in room_items {
-        for &item_id in ids {
-            item_room.insert(item_id, room_id);
-        }
-    }
+    let def_map: HashMap<i64, &ItemDef> = item_defs.iter().map(|d| (d.id, d)).collect();
 
-    for def in item_defs {
-        let room_id = item_room.get(&def.id).copied().unwrap_or(1) as i64;
-        db.execute(Statement::from_sql_and_values(
-            DbBackend::Sqlite,
-            "INSERT OR IGNORE INTO items (
-                id, name, description, equip_slot, two_handed, bag_capacity,
-                req_level, req_strength, req_dexterity, req_knowledge,
-                location, room_id
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            [
-                def.id.into(),
-                def.name.clone().into(),
-                def.description.clone().into(),
-                def.equip_slot.clone().into(),
-                (def.two_handed as i64).into(),
-                def.bag_capacity.map(|c| c as i64).into(),
-                (def.requirements.level as i64).into(),
-                (def.requirements.strength as i64).into(),
-                (def.requirements.dexterity as i64).into(),
-                (def.requirements.knowledge as i64).into(),
-                "room".into(),
-                room_id.into(),
-            ],
-        ))
-        .await?;
+    for (&room_id, def_ids) in room_items {
+        for &def_id in def_ids {
+            let Some(def) = def_map.get(&def_id) else {
+                continue;
+            };
+            db.execute(Statement::from_sql_and_values(
+                DbBackend::Sqlite,
+                "INSERT INTO items (
+                    def_id, name, description, equip_slot, two_handed, bag_capacity,
+                    req_level, req_strength, req_dexterity, req_knowledge,
+                    location, room_id
+                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    def_id.into(),
+                    def.name.clone().into(),
+                    def.description.clone().into(),
+                    def.equip_slot.clone().into(),
+                    (def.two_handed as i64).into(),
+                    def.bag_capacity.map(|c| c as i64).into(),
+                    (def.requirements.level as i64).into(),
+                    (def.requirements.strength as i64).into(),
+                    (def.requirements.dexterity as i64).into(),
+                    (def.requirements.knowledge as i64).into(),
+                    "room".into(),
+                    (room_id as i64).into(),
+                ],
+            ))
+            .await?;
+        }
     }
 
     Ok(())
@@ -99,7 +196,7 @@ pub async fn load_for_character(
 
 // ── Admin item operations ─────────────────────────────────────────────────────
 
-/// Inserts a brand-new item row. `item.id` must be pre-assigned by the caller.
+/// Inserts a brand-new item instance. `item.id` must be pre-assigned by the caller.
 pub async fn create(db: &DatabaseConnection, item: &ItemData) -> Result<(), DbErr> {
     let room_id: Option<i64> = match &item.location {
         ItemLocation::Room(id) => Some(*id as i64),
@@ -108,12 +205,13 @@ pub async fn create(db: &DatabaseConnection, item: &ItemData) -> Result<(), DbEr
     db.execute(Statement::from_sql_and_values(
         DbBackend::Sqlite,
         "INSERT OR IGNORE INTO items (
-            id, name, description, equip_slot, two_handed, bag_capacity,
+            id, def_id, name, description, equip_slot, two_handed, bag_capacity,
             req_level, req_strength, req_dexterity, req_knowledge,
             location, room_id
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             item.id.into(),
+            item.def_id.into(),
             item.name.clone().into(),
             item.description.clone().into(),
             item.equip_slot.map(|s| s.to_string()).into(),
@@ -256,6 +354,7 @@ pub async fn save_location(db: &DatabaseConnection, save: &ItemLocationSave) -> 
 
 fn row_to_item_data(r: &sea_orm::QueryResult) -> Result<ItemData, DbErr> {
     let id: i64 = r.try_get("", "id")?;
+    let def_id: i64 = r.try_get("", "def_id")?;
     let name: String = r.try_get("", "name")?;
     let description: String = r.try_get("", "description")?;
     let equip_slot_str: Option<String> = r.try_get("", "equip_slot")?;
@@ -288,6 +387,7 @@ fn row_to_item_data(r: &sea_orm::QueryResult) -> Result<ItemData, DbErr> {
 
     Ok(ItemData {
         id,
+        def_id,
         name,
         description,
         equip_slot,
@@ -300,6 +400,95 @@ fn row_to_item_data(r: &sea_orm::QueryResult) -> Result<ItemData, DbErr> {
             knowledge: req_knowledge as i32,
         },
         location,
+    })
+}
+
+pub async fn update_def_name(db: &DatabaseConnection, id: i64, name: &str) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "UPDATE item_definitions SET name=? WHERE id=?",
+        [name.into(), id.into()],
+    ))
+    .await?;
+    Ok(())
+}
+
+pub async fn update_def_description(
+    db: &DatabaseConnection,
+    id: i64,
+    description: &str,
+) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "UPDATE item_definitions SET description=? WHERE id=?",
+        [description.into(), id.into()],
+    ))
+    .await?;
+    Ok(())
+}
+
+pub async fn update_def_slot(
+    db: &DatabaseConnection,
+    id: i64,
+    equip_slot: Option<&str>,
+) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "UPDATE item_definitions SET equip_slot=? WHERE id=?",
+        [equip_slot.map(|s| s.to_string()).into(), id.into()],
+    ))
+    .await?;
+    Ok(())
+}
+
+pub async fn update_def_requirements(
+    db: &DatabaseConnection,
+    id: i64,
+    level: i32,
+    strength: i32,
+    dexterity: i32,
+    knowledge: i32,
+) -> Result<(), DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "UPDATE item_definitions SET req_level=?, req_strength=?, req_dexterity=?, req_knowledge=? WHERE id=?",
+        [
+            (level as i64).into(),
+            (strength as i64).into(),
+            (dexterity as i64).into(),
+            (knowledge as i64).into(),
+            id.into(),
+        ],
+    ))
+    .await?;
+    Ok(())
+}
+
+fn row_to_item_def(r: &sea_orm::QueryResult) -> Result<ItemDef, DbErr> {
+    let id: i64 = r.try_get("", "id")?;
+    let name: String = r.try_get("", "name")?;
+    let description: String = r.try_get("", "description")?;
+    let equip_slot: Option<String> = r.try_get("", "equip_slot")?;
+    let two_handed: i64 = r.try_get("", "two_handed")?;
+    let bag_capacity: Option<i64> = r.try_get("", "bag_capacity")?;
+    let req_level: i64 = r.try_get("", "req_level")?;
+    let req_strength: i64 = r.try_get("", "req_strength")?;
+    let req_dexterity: i64 = r.try_get("", "req_dexterity")?;
+    let req_knowledge: i64 = r.try_get("", "req_knowledge")?;
+
+    Ok(ItemDef {
+        id,
+        name,
+        description,
+        equip_slot,
+        two_handed: two_handed != 0,
+        bag_capacity: bag_capacity.map(|c| c as usize),
+        requirements: EquipRequirements {
+            level: req_level as i32,
+            strength: req_strength as i32,
+            dexterity: req_dexterity as i32,
+            knowledge: req_knowledge as i32,
+        },
     })
 }
 

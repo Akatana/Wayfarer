@@ -1,11 +1,11 @@
-﻿use crate::command::ClientId;
+use crate::command::ClientId;
 use crate::components::{
     Hostile, Name, NpcDescription, NpcGreeting, NpcId, NpcRoutine, Passive, PatrolRoute, Position,
 };
 use crate::game_state::{AdminDbOp, GameState};
-use crate::systems::queries::find_npc_in_room;
 use crate::npc::NpcData;
 use crate::systems::output::{send_to_client, OutputRegistry};
+use crate::systems::queries::find_npc_in_room;
 
 pub(crate) fn find_npc_entity(world: &hecs::World, npc_id: i64) -> Option<hecs::Entity> {
     let mut q = world.query::<(&NpcId,)>();
@@ -58,6 +58,7 @@ pub(crate) fn handle_admin_mnpc(
         max_damage: 4,
         attack_ticks: 10,
         xp_reward: 10,
+        loot_table: Vec::new(),
     };
 
     state.world.spawn((

@@ -19,7 +19,8 @@ pub(super) fn handle_talk(
     };
 
     let target_lower = target.trim().to_lowercase();
-    let Some((npc_e, npc_name, npc_db_id)) = find_npc_in_room(&state.world, room_id, &target_lower) else {
+    let Some((npc_e, npc_name, npc_db_id)) = find_npc_in_room(&state.world, room_id, &target_lower)
+    else {
         send_to_client(
             registry,
             client_id,

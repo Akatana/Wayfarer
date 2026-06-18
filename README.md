@@ -30,8 +30,8 @@ cargo run
 On first boot the engine will:
 
 1. Create `wayfarer.db` in the current directory
-2. Run schema migrations (`accounts`, `characters`, `rooms`, `exits` tables)
-3. Seed the starter world (4 rooms) if the `rooms` table is empty
+2. Run schema migrations (`accounts`, `characters`, `rooms`, `exits`, `items`, `item_definitions`, `npcs`, `quests` tables)
+3. Seed the starter world (4 rooms, 8 item definitions, 8 item instances, NPCs, and quests) if the tables are empty
 4. Start the Telnet server on **port 4000** and WebSocket server on **port 4001**
 
 The first account registered via the in-game menu automatically becomes admin.
@@ -98,12 +98,18 @@ Three layers communicate via `tokio::sync::mpsc` channels:
 ```
 src/
 ├── network/    # Telnet + WebSocket accept loops, session handlers, command parser
-├── systems/    # Input dispatch, movement, NPC routines, output routing
-├── world/      # Room registry, player registry, seed data
-├── db/         # SeaORM entities and schema for accounts, characters, rooms, and exits
+├── systems/    # Input dispatch, movement, NPC routines, combat, output routing
+├── world/      # Room registry, player registry, seed data, JSON loaders
+├── db/         # Schema, migrations, and raw SQL helpers for all tables
 ├── game_loop.rs
 ├── game_state.rs
 └── color.rs    # <tag> → ANSI markup renderer
+assets/
+├── rooms/      # One JSON file per room; references item def ids for starting placements
+├── items.json  # Item definitions (templates); seeded into item_definitions table on first boot
+├── npcs.json   # NPC definitions with combat stats and loot tables
+├── quests.json # Quest definitions with phases, objectives, and rewards
+└── dialogues.json # NPC dialogue trees with conditions and effects
 tests/
 └── integration_tests.rs
 ```

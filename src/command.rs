@@ -75,6 +75,10 @@ pub enum Command {
     AdminIslot(i64, String),
     /// Set one stat requirement on an item by id: stat ∈ {str, dex, knw, level} (admin only).
     AdminIreq(i64, String, i32),
+    /// Spawn an instance of an item definition (by def_id) in the current room (admin only).
+    AdminIspawn(i64),
+    /// List all loaded item definitions (admin only).
+    AdminIdefs,
     /// Initiate combat with a named NPC in the current room.
     Attack(String),
     /// Break off combat and flee to a random exit.

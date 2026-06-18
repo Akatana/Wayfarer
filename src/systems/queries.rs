@@ -1,5 +1,7 @@
 use crate::command::ClientId;
-use crate::components::{ClientConnection, InInventory, ItemName, Name, NpcId, Position, RoomContents};
+use crate::components::{
+    ClientConnection, InInventory, ItemName, Name, NpcId, Position, RoomContents,
+};
 
 /// Finds the first item on the floor of `room_id` whose name contains `name_lower`.
 pub fn find_item_in_room(

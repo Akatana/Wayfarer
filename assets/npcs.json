@@ -39,6 +39,10 @@
     "min_damage": 1,
     "max_damage": 5,
     "attack_ticks": 6,
-    "xp_reward": 15
+    "xp_reward": 15,
+    "loot_table": [
+      { "item_id": 2, "chance": 1.0 },
+      { "item_id": 1, "chance": 0.35 }
+    ]
   }
 ]
